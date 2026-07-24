@@ -80,15 +80,15 @@ public static class UpdateService
     public static async Task CheckAndStageAsync()
     {
         if (!UpdateConfig.Enabled) return;
-        string? token = Token;
-        if (string.IsNullOrEmpty(token)) return;
+        string? token = Token; // 공개 저장소면 토큰 없이 동작. 토큰이 있으면(비공개 대비) 인증에 사용.
 
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Slimey-Updater");
-            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            if (!string.IsNullOrEmpty(token))
+                http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             string api = $"https://api.github.com/repos/{UpdateConfig.Owner}/{UpdateConfig.Repo}/releases/latest";
             string json = await http.GetStringAsync(api);
@@ -102,21 +102,27 @@ public static class UpdateService
             if (File.Exists(PendingVer) && Version.TryParse(File.ReadAllText(PendingVer).Trim(), out var staged)
                 && Normalize(staged) >= latest) return;
 
-            string? assetUrl = null;
+            string? apiUrl = null, browserUrl = null;
             foreach (var a in root.GetProperty("assets").EnumerateArray())
             {
                 string name = a.GetProperty("name").GetString() ?? "";
                 if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 {
-                    assetUrl = a.GetProperty("url").GetString(); // asset API URL
+                    apiUrl = a.GetProperty("url").GetString();                                  // asset API URL(인증 필요)
+                    browserUrl = a.TryGetProperty("browser_download_url", out var b) ? b.GetString() : null; // 공개 직링크
                     break;
                 }
             }
-            if (assetUrl == null) return;
 
-            using var req = new HttpRequestMessage(HttpMethod.Get, assetUrl);
+            // 공개 저장소: 인증 없는 직링크(browser_download_url)로 받는다.
+            // 토큰이 있으면(비공개 대비) asset API URL + octet-stream 으로 받는다.
+            bool useApi = !string.IsNullOrEmpty(token) && apiUrl != null;
+            string? downloadUrl = useApi ? apiUrl : browserUrl;
+            if (downloadUrl == null) return;
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
             req.Headers.Accept.Clear();
-            req.Headers.Accept.ParseAdd("application/octet-stream"); // 비공개 자산 바이너리 다운로드
+            if (useApi) req.Headers.Accept.ParseAdd("application/octet-stream");
             using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
             resp.EnsureSuccessStatusCode();
 
