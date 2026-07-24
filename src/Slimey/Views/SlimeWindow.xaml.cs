@@ -736,6 +736,7 @@ public partial class SlimeWindow : Window
                 else Hide();
                 break;
             case nameof(AppSettings.Skin):
+                ClearExtraBalls(); // 테마(스킨) 바꾸면 놓았던 3/4구 당구공도 함께 치운다
                 ApplySkin();
                 break;
             case nameof(AppSettings.CueStickMode):

@@ -15,9 +15,9 @@
     <!-- WPF 진입점이므로 DPI 는 매니페스트로 제어. WinForms 의 DPI 경고는 억제. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
     <!-- 버전(자동 업데이트 비교 기준). 릴리스마다 올린다. -->
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
   </PropertyGroup>
 
 </Project>
