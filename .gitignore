@@ -1,0 +1,16 @@
+# .NET build output
+bin/
+obj/
+*.user
+.vs/
+
+# Publish output
+publish/
+*.exe.staging
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# 로컬 업데이트 토큰(절대 커밋 금지)
+update_token.txt

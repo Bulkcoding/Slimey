@@ -1,0 +1,20 @@
+namespace Slimey.Models;
+
+/// <summary>슬라임 창에 표시할 스킨 종류. 새 스킨은 여기에 추가하고 대응 UserControl 을 만든다.</summary>
+public enum SlimeSkinKind
+{
+    /// <summary>기본 민트/보라 젤리 슬라임.</summary>
+    Jelly = 0,
+
+    /// <summary>당구공(반들반들 8-ball) — "당구공처럼 튕긴다" 컨셉.</summary>
+    Billiard = 1,
+
+    /// <summary>몬스터볼 — 클릭 시 열리는 이펙트.</summary>
+    Pokeball = 2,
+
+    /// <summary>하이퍼볼(울트라볼) — 검정+노랑.</summary>
+    Ultra = 3,
+
+    /// <summary>마스터볼 — 보라+분홍 M.</summary>
+    Master = 4,
+}

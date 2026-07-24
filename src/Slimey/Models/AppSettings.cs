@@ -1,0 +1,212 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
+
+namespace Slimey.Models;
+
+/// <summary>
+/// 물리·상호작용·시각 효과의 튜닝 값을 한곳에 모은 설정 객체.
+/// 핵심 수치는 여기에서만 관리하며 코드에 하드코딩하지 않는다.
+///
+/// SettingsWindow 가 이 인스턴스에 직접 바인딩한다. 물리 루프가 매 프레임
+/// 설정값을 읽으므로, INotifyPropertyChanged 알림 대상(사용자 조절 항목)은
+/// 슬라이더/토글을 움직이는 즉시 효과가 반영된다.
+/// (Topmost·Paused·표시 여부처럼 즉시 반영이 필요한 항목은
+///  SlimeWindow 가 PropertyChanged 를 구독해 처리한다.)
+/// </summary>
+public sealed class AppSettings : INotifyPropertyChanged
+{
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        return true;
+    }
+
+    // ── 물리 ────────────────────────────────────────────────
+    // 엔진 튜닝 상수는 저장하지 않고 항상 코드 기본값 사용(JsonIgnore) → 파일이 옛 값으로 덮어쓰지 않음.
+    /// <summary>공기저항/마찰 감쇠율(1/s). 낮을수록 멀리 오래 튄다. velocity *= exp(-Friction*dt)</summary>
+    [JsonIgnore] public double Friction { get; set; } = 0.9;
+
+    /// <summary>반발 계수(Bounce Power). 충돌 시 velocity *= Restitution. 0~1</summary>
+    private double _restitution = 0.7;
+    public double Restitution { get => _restitution; set => Set(ref _restitution, value); }
+
+    /// <summary>관성 이동 최대 속도(px/s). 폭주 방지 상한.</summary>
+    [JsonIgnore] public double MaxSpeed { get; set; } = 7000.0;
+
+    /// <summary>던질 때 계산되는 초기 속도 상한(px/s). 쎄게 던지면 팡팡 튀도록 높게.</summary>
+    [JsonIgnore] public double MaxThrowSpeed { get; set; } = 7000.0;
+
+    /// <summary>던지기 가중치. 계산된 마우스 속도에 곱한다. 1.0 = 실제 마우스 속도 그대로.</summary>
+    private double _throwPower = 1.0;
+    public double ThrowPower { get => _throwPower; set => Set(ref _throwPower, value); }
+
+    /// <summary>이 속도(px/s) 미만이면 완전히 정지시켜 저속 진동을 막는다.</summary>
+    public double StopThreshold { get; set; } = 20.0;
+
+    /// <summary>한 프레임 이동량이 이 값(px)을 넘으면 substep 으로 분할해 터널링 방지.</summary>
+    public double SubstepMaxPx { get; set; } = 48.0;
+
+    /// <summary>프레임 간 dt 상한(s). 창 멈춤/포커스 복귀 후 큰 점프 방지.</summary>
+    public double MaxFrameDeltaSeconds { get; set; } = 0.05;
+
+    // ── 스핀 ────────────────────────────────────────────────
+    /// <summary>각속도 상한(deg/s).</summary>
+    public double MaxAngularVelocity { get; set; } = 1200.0;
+
+    /// <summary>스핀 감쇠율(1/s). 클수록 빨리 멈춘다. angVel *= exp(-SpinFriction*dt)</summary>
+    public double SpinFriction { get; set; } = 0.55;
+
+    /// <summary>이 각속도(deg/s) 미만이면 스핀 정지.</summary>
+    public double SpinStopThreshold { get; set; } = 8.0;
+
+    /// <summary>마그누스 계수. 옆으로 휘는 가속 = MagnusStrength * angVel(deg/s) * speed(px/s).</summary>
+    public double MagnusStrength { get; set; } = 0.0005;
+
+    /// <summary>벽 충돌 시 스핀이 접선 방향으로 튀게 하는 계수(px/s per deg/s).</summary>
+    public double SpinWallKick { get; set; } = 0.5;
+
+    /// <summary>벽 충돌 시 남는 스핀 비율(스핀이 벽에 소모됨).</summary>
+    public double SpinWallRetain { get; set; } = 0.55;
+
+    /// <summary>드래그 곡선 1도당 충전되는 스핀 배율(관성감).</summary>
+    public double SpinChargeGain { get; set; } = 2.4;
+
+    /// <summary>드래그 중 스핀의 완만한 감쇠(1/s). 직선 구간에서도 스핀이 유지되도록 작게.</summary>
+    public double SpinChargeDecay { get; set; } = 0.7;
+
+    /// <summary>스핀 이펙트(아크/반짝이)가 나타나기 시작하는 각속도(deg/s).</summary>
+    public double SpinFxMinAngular { get; set; } = 140.0;
+
+    // ── 표면 스핀(끌어치기/밀어치기: 세로 스핀) ─────────────
+    /// <summary>표면 스핀(px/s)당 샷축 가속 배율(1/s). 클수록 되돌림/밀림이 강하다.
+    /// 되돌아오는 총 속도변화 ≈ 표면스핀 × (DrawFollowStrength / SurfaceSpinFriction).</summary>
+    [JsonIgnore] public double DrawFollowStrength { get; set; } = 1.1;
+
+    /// <summary>표면 스핀 감쇠율(1/s). 작을수록 공이 더 멀리 나갔다가 천천히 돌아온다.</summary>
+    [JsonIgnore] public double SurfaceSpinFriction { get; set; } = 1.0;
+
+    /// <summary>이 표면스핀(px/s) 미만이면 정지 처리.</summary>
+    [JsonIgnore] public double SurfaceSpinStopThreshold { get; set; } = 4.0;
+
+    // ── 입력(던지기) ────────────────────────────────────────
+    /// <summary>투척 속도 계산에 사용할 최근 샘플 시간창(ms). 짧을수록 놓는 순간의 실제 속도에 가깝다.</summary>
+    [JsonIgnore] public double ThrowSampleWindowMs { get; set; } = 60.0;
+
+    // ── 슬라임 크기/시각 ────────────────────────────────────
+    /// <summary>슬라임 크기(물리 픽셀 기준 지름).</summary>
+    private double _slimeSize = 96.0;
+    public double SlimeSize { get => _slimeSize; set => Set(ref _slimeSize, value); }
+
+    /// <summary>말랑함(Slime Softness). Squash/Stretch 강도 스케일. 0~1</summary>
+    private double _softness = 0.5;
+    public double Softness { get => _softness; set => Set(ref _softness, value); }
+
+    /// <summary>이동 중 최대 늘어남 비율(Stretch 상한).</summary>
+    public double MaxStretch { get; set; } = 0.35;
+
+    /// <summary>스쿼시/스트레치가 원래 형태로 복귀하는 스프링 강성(클수록 빠르게 복귀).</summary>
+    public double AnimationStiffness { get; set; } = 18.0;
+
+    // ── 상호작용 모드 ───────────────────────────────────────
+    /// <summary>던지기 활성화.</summary>
+    private bool _throwMode = true;
+    public bool ThrowMode { get => _throwMode; set => Set(ref _throwMode, value); }
+
+    /// <summary>클릭 펀치 활성화(Phase 4 에서 시각/음향 확장).</summary>
+    private bool _punchMode = true;
+    public bool PunchMode { get => _punchMode; set => Set(ref _punchMode, value); }
+
+    /// <summary>펀치(때리기) 시 튀는 초기 속도(px/s).</summary>
+    public double PunchImpulse { get; set; } = 700.0;
+
+    /// <summary>드래그로 판정할 최소 이동 거리(px). 이하이면 클릭(펀치)으로 본다.</summary>
+    public double ClickMoveThreshold { get; set; } = 6.0;
+
+    /// <summary>이 속도(px/s)보다 빠르게 움직이던 것을 클릭하면 "낚아채기"로 판정(펀치 X).</summary>
+    public double CatchSpeedThreshold { get; set; } = 3.0;
+
+    /// <summary>슬라임 가장자리에서 이 거리(px) 안을 클릭하면 낚아챈다(전역 훅). 빠른 슬라임도 근처 클릭으로 잡기.</summary>
+    public double CatchExtraPx { get; set; } = 85.0;
+
+    // ── 잡기 단축키(전역) ───────────────────────────────────
+    /// <summary>잡기 단축키 수정자(Win32: ALT=1,CTRL=2,SHIFT=4,WIN=8 조합). 기본 CTRL+SHIFT.</summary>
+    private int _catchHotkeyMod = 2 | 4;
+    public int CatchHotkeyMod { get => _catchHotkeyMod; set => Set(ref _catchHotkeyMod, value); }
+
+    /// <summary>잡기 단축키 가상키 코드(키보드). 0이면 키보드 트리거 없음. 기본 'G'(0x47).</summary>
+    private int _catchHotkeyVk = 0x47;
+    public int CatchHotkeyVk { get => _catchHotkeyVk; set => Set(ref _catchHotkeyVk, value); }
+
+    /// <summary>잡기 단축키 마우스 버튼 트리거. 0=없음, 1=좌, 2=우, 3=중앙. (수정자와 조합)</summary>
+    private int _catchHotkeyMouse;
+    public int CatchHotkeyMouse { get => _catchHotkeyMouse; set => Set(ref _catchHotkeyMouse, value); }
+
+    /// <summary>효과음 사용(Phase 4).</summary>
+    private bool _soundEnabled = true;
+    public bool SoundEnabled { get => _soundEnabled; set => Set(ref _soundEnabled, value); }
+
+    /// <summary>효과음 기본 볼륨(0~1).</summary>
+    private double _soundVolume = 0.7;
+    public double SoundVolume { get => _soundVolume; set => Set(ref _soundVolume, value); }
+
+    // ── 파티클 / 충돌 효과(Phase 4) ─────────────────────────
+    /// <summary>충돌 파티클 사용.</summary>
+    private bool _particlesEnabled = true;
+    public bool ParticlesEnabled { get => _particlesEnabled; set => Set(ref _particlesEnabled, value); }
+
+    /// <summary>약한 충돌 시 파티클 최소 개수.</summary>
+    public int ParticleBaseCount { get; set; } = 5;
+
+    /// <summary>강한 충돌 시 파티클 최대 개수.</summary>
+    public int ParticleMaxCount { get; set; } = 22;
+
+    /// <summary>파티클 수명(초).</summary>
+    public double ParticleLifeSeconds { get; set; } = 0.7;
+
+    /// <summary>파티클 중력 가속도(px/s^2).</summary>
+    public double ParticleGravity { get; set; } = 2600.0;
+
+    /// <summary>파티클 방출 속도 최소/최대(px/s).</summary>
+    public double ParticleSpeedMin { get; set; } = 120.0;
+    public double ParticleSpeedMax { get; set; } = 640.0;
+
+    /// <summary>파티클 크기(px).</summary>
+    public double ParticleSize { get; set; } = 9.0;
+
+    /// <summary>이 비율(MaxSpeed 대비) 미만이면 효과(소리/파티클) 생략.</summary>
+    public double ImpactSoftFraction { get; set; } = 0.12;
+
+    /// <summary>BOING → SPLAT 전환 비율.</summary>
+    public double ImpactMediumFraction { get; set; } = 0.30;
+
+    /// <summary>SPLAT → BONK 전환 비율.</summary>
+    public double ImpactHardFraction { get; set; } = 0.60;
+
+    /// <summary>항상 위(Topmost).</summary>
+    private bool _alwaysOnTop = true;
+    public bool AlwaysOnTop { get => _alwaysOnTop; set => Set(ref _alwaysOnTop, value); }
+
+    /// <summary>물리 일시 정지.</summary>
+    private bool _paused = false;
+    public bool Paused { get => _paused; set => Set(ref _paused, value); }
+
+    /// <summary>슬라임 표시 여부.</summary>
+    private bool _slimeVisible = true;
+    public bool SlimeVisible { get => _slimeVisible; set => Set(ref _slimeVisible, value); }
+
+    /// <summary>표시할 스킨(젤리/당구공 등).</summary>
+    private SlimeSkinKind _skin = SlimeSkinKind.Jelly;
+    public SlimeSkinKind Skin { get => _skin; set => Set(ref _skin, value); }
+
+    /// <summary>큐대로 때리기 모드(당구공 전용). 켜면 공 근처 클릭→큐대 당겨 밀어서 발사.</summary>
+    private bool _cueStickMode;
+    public bool CueStickMode { get => _cueStickMode; set => Set(ref _cueStickMode, value); }
+
+    /// <summary>큐대 당긴 거리(px)당 발사 속도 배율.</summary>
+    [JsonIgnore] public double CuePowerScale { get; set; } = 11.0;
+}

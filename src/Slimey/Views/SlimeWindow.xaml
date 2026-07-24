@@ -1,0 +1,96 @@
+<Window x:Class="Slimey.Views.SlimeWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Slimey"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        SizeToContent="Manual"
+        Width="384" Height="384"
+        Left="0" Top="0">
+
+    <Window.Resources>
+        <RadialGradientBrush x:Key="SparkBrush">
+            <GradientStop Color="#FFFFF6C6" Offset="0.0"/>
+            <GradientStop Color="#DDFFE24D" Offset="0.4"/>
+            <GradientStop Color="#00FFE24D" Offset="1.0"/>
+        </RadialGradientBrush>
+    </Window.Resources>
+
+    <Window.ContextMenu>
+        <ContextMenu Style="{StaticResource DarkMenu}" Opened="OnMenuOpened">
+            <MenuItem Header="설정" Click="OnOpenSettings" Style="{StaticResource DarkMenuItem}" FontWeight="SemiBold"/>
+            <MenuItem Header="위치 초기화" Click="OnResetPosition" Style="{StaticResource DarkMenuItem}"/>
+            <Separator x:Name="MenuBilliardSep" Style="{StaticResource DarkSeparator}"/>
+            <MenuItem x:Name="Menu4Ball" Header="4구 놓기 (빨강2·노랑1)" Click="On4Ball" Style="{StaticResource DarkMenuItem}"/>
+            <MenuItem x:Name="Menu3Ball" Header="3구 놓기 (빨강1·노랑1)" Click="On3Ball" Style="{StaticResource DarkMenuItem}"/>
+            <MenuItem x:Name="MenuClearBalls" Header="당구공 치우기" Click="OnClearBalls" Style="{StaticResource DarkMenuItem}"/>
+            <Separator Style="{StaticResource DarkSeparator}"/>
+            <MenuItem Header="종료" Click="OnExit" Style="{StaticResource DarkMenuItem}"/>
+        </ContextMenu>
+    </Window.ContextMenu>
+
+    <!-- 창은 슬라임보다 넉넉히 커서(패딩) 주변 이펙트를 그릴 수 있다. -->
+    <Grid>
+
+        <!-- 전체 창을 클릭 대상으로: 날아가는 슬라임을 넉넉한 범위로 낚아챌 수 있게 함.
+             레이어드 창은 alpha=0(#00) 픽셀을 OS 단에서 클릭 통과시키므로,
+             거의 안 보이는 alpha=1(#01) 배경으로 클릭을 확실히 잡는다. -->
+        <Border Background="#01000000"/>
+
+        <!-- ═══ 스핀 이펙트: 중앙 고정(창 크기와 분리), 설계 캔버스 240 ═══ -->
+        <Viewbox x:Name="SpinFxBox" Stretch="Uniform" IsHitTestVisible="False"
+                 HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Canvas Width="240" Height="240">
+                <Grid x:Name="SpinFx" Width="240" Height="240" Opacity="0">
+                    <!-- 반짝이(코드에서 채움, 트윈클). 스핀과 독립된 완만한 자체 회전. -->
+                    <Canvas x:Name="SparkLayer" Width="240" Height="240" RenderTransformOrigin="0.5,0.5">
+                        <Canvas.RenderTransform>
+                            <RotateTransform x:Name="SparkRotate"/>
+                        </Canvas.RenderTransform>
+                    </Canvas>
+                </Grid>
+            </Canvas>
+        </Viewbox>
+
+        <!-- ═══ 슬라임 본체: 중앙에 SlimeSize 크기로 고정 ═══ -->
+        <Viewbox x:Name="SlimeBox" Stretch="Uniform"
+                 HorizontalAlignment="Center" VerticalAlignment="Center">
+            <!-- SlimeVisual: 이 Grid 에만 RenderTransform 적용. 비주얼 교체 시 이 안만 바꾸면 됨. -->
+            <Grid x:Name="SlimeVisual" Width="96" Height="96" RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform x:Name="SlimeScale" ScaleX="1" ScaleY="1"/>
+                        <RotateTransform x:Name="SlimeRotate" Angle="0"/>
+                    </TransformGroup>
+                </Grid.RenderTransform>
+
+                <!-- 그림자(스킨 공통) -->
+                <Ellipse Margin="14,20,14,6" Fill="#33000000">
+                    <Ellipse.Effect>
+                        <BlurEffect Radius="8"/>
+                    </Ellipse.Effect>
+                </Ellipse>
+
+                <!-- 스킨 호스트: 코드에서 선택된 스킨(UserControl)을 넣는다. -->
+                <ContentControl x:Name="SkinHost"/>
+            </Grid>
+        </Viewbox>
+
+        <!-- ═══ 스핀 조준(큐대 모드): 공 위 원 + 이동 가능한 점(칠 지점=스핀) ═══ -->
+        <Grid x:Name="SpinAim" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Visibility="Collapsed" IsHitTestVisible="False">
+            <Ellipse x:Name="SpinCircle" Stroke="#B0FFFFFF" StrokeThickness="1.5" StrokeDashArray="3 3"/>
+            <Ellipse Width="14" Height="14" Fill="#E8623D" Stroke="White" StrokeThickness="1.5"
+                     HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Ellipse.RenderTransform>
+                    <TranslateTransform x:Name="SpinDotShift"/>
+                </Ellipse.RenderTransform>
+            </Ellipse>
+        </Grid>
+
+    </Grid>
+</Window>
