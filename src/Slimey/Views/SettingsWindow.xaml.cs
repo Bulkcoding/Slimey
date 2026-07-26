@@ -72,6 +72,7 @@ public partial class SettingsWindow : Window
         (SlimeSkinKind.Ultra, "하이퍼볼"),
         (SlimeSkinKind.Master, "마스터볼"),
         (SlimeSkinKind.Basketball, "농구공"),
+        (SlimeSkinKind.Bowling, "볼링공"),
     };
 
     private void BuildThemeCards()
@@ -126,6 +127,7 @@ public partial class SettingsWindow : Window
         SlimeSkinKind.Billiard => new BilliardSkin(),
         SlimeSkinKind.Pokeball or SlimeSkinKind.Ultra or SlimeSkinKind.Master => new BallSkin(kind),
         SlimeSkinKind.Basketball => new BasketballSkin(),
+        SlimeSkinKind.Bowling => new BowlingSkin(),
         _ => new JellySkin(),
     };
 

@@ -1,0 +1,25 @@
+<UserControl x:Class="Slimey.Views.Skins.PinSkin"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             IsHitTestVisible="False">
+    <!-- 디자인 캔버스 320 = 핀 창 전체(= SlimeSize * 10/3).
+         핀은 길쭉한 실제 비율(높이:최대폭 ≈ 3.4:1, 좁은 바닥)이며 밑동은 물리 박스 하단(y=208)에 놓인다.
+         핀 길이(150) < 캔버스 절반(160) 이라 완전히 눕혀도 잘리지 않는다. -->
+    <Viewbox Stretch="Uniform">
+        <Grid Width="320" Height="320">
+            <!-- 바닥 그림자(핀이 넘어져도 자리에 남는다) -->
+            <Ellipse x:Name="BaseShadow" Width="30" Height="10" Fill="#38000000"
+                     HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,203,0,0">
+                <Ellipse.Effect><BlurEffect Radius="4"/></Ellipse.Effect>
+            </Ellipse>
+
+            <!-- 핀 본체(넘어질 때 밑동(160, 208) = (0.5, 0.65)을 축으로 회전) -->
+            <Grid x:Name="PinGroup" RenderTransformOrigin="0.5,0.65">
+                <Grid.RenderTransform>
+                    <RotateTransform x:Name="Tip" Angle="0"/>
+                </Grid.RenderTransform>
+                <Canvas x:Name="PinCanvas" Width="320" Height="320"/>
+            </Grid>
+        </Grid>
+    </Viewbox>
+</UserControl>

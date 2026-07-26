@@ -30,6 +30,10 @@
             <MenuItem x:Name="MenuClearBalls" Header="당구공 치우기" Click="OnClearBalls" Style="{StaticResource DarkMenuItem}"/>
             <Separator x:Name="MenuBasketballSep" Style="{StaticResource DarkSeparator}"/>
             <MenuItem x:Name="MenuHoops" Header="농구골대 구현" Click="OnToggleHoops" Style="{StaticResource DarkMenuItem}"/>
+            <Separator x:Name="MenuBowlingSep" Style="{StaticResource DarkSeparator}"/>
+            <MenuItem x:Name="MenuBowlingStart" Header="볼링하기 🎳" Click="OnBowlingStart" Style="{StaticResource DarkMenuItem}"/>
+            <MenuItem x:Name="MenuBowlingReset" Header="핀 다시 세우기" Click="OnBowlingReset" Style="{StaticResource DarkMenuItem}"/>
+            <MenuItem x:Name="MenuBowlingExit" Header="볼링 끝내기" Click="OnBowlingExit" Style="{StaticResource DarkMenuItem}"/>
             <Separator Style="{StaticResource DarkSeparator}"/>
             <MenuItem Header="종료" Click="OnExit" Style="{StaticResource DarkMenuItem}"/>
         </ContextMenu>

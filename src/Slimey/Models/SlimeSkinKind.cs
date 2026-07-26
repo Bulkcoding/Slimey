@@ -20,4 +20,7 @@ public enum SlimeSkinKind
 
     /// <summary>농구공 — 주황 구체에 검정 씸. 튈 때마다 무늬 변경 + 골대 넣기.</summary>
     Basketball = 5,
+
+    /// <summary>볼링공 — 파란 마블. 굴러가며 9가지 무늬(손가락 구멍 배치)가 바뀐다.</summary>
+    Bowling = 6,
 }
