@@ -133,17 +133,22 @@ public partial class ParticleOverlayWindow : Window
 
         if (n > 0)
         {
-            // 파티클 무리 중심 계산 → 창을 그 위치로 이동(이동만, 리사이즈/Show 없음)
-            double cx = 0, cy = 0;
+            // 파티클 무리의 **경계 중심**으로 창 이동(이동만, 리사이즈/Show 없음).
+            // 무게중심을 쓰면 입자가 한쪽에 몰릴 때 치우쳐 반대쪽이 창 밖으로 잘린다.
+            // 퍼짐이 창을 넘지 않는다는 보장은 ParticleSystem.MaxSpreadPx 가 담당.
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
             for (int i = 0; i < n; i++)
             {
-                cx += particles[i].Position.X;
-                cy += particles[i].Position.Y;
+                double x = particles[i].Position.X, y = particles[i].Position.Y;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
-            cx /= n; cy /= n;
 
-            _originPxX = cx - FollowSizePx / 2.0;
-            _originPxY = cy - FollowSizePx / 2.0;
+            _originPxX = (minX + maxX) / 2.0 - FollowSizePx / 2.0;
+            _originPxY = (minY + maxY) / 2.0 - FollowSizePx / 2.0;
             Left = _originPxX / _dpiScaleX;
             Top = _originPxY / _dpiScaleY;
         }

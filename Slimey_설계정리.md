@@ -373,3 +373,69 @@ dotnet run  --project src/Slimey/Slimey.csproj
   - 매핑: 6시(아래,+y)→`SurfaceSpin=-power`(끌어치기), 12시(위,-y)→`+power`(밀어치기), 가로 점→`AngularVelocity=_spinOffset.X×MaxAngularVelocity`.
   - 튜닝(시뮬레이션): 처음 1.6/0.9는 복귀가 대포처럼 너무 셈("되돌아오는거 너무 쎄"). **현실적으로 `DrawFollowStrength=1.1`, `SurfaceSpinFriction=1.0`** 로 낮춤(JsonIgnore). 잡기/조준 시작 시 SurfaceSpin=0.
 - 검증(실앱 물리 진행): 6시 강타→565px 전진 후 **반전해 원점 살짝 뒤(−57px)에서 멈춤**, 12시→3544px(무스핀 1743보다 멀리), 무스핀→굴러 정지, 3시→각속도 1200·반전없음. 빌드 0/0.
+
+### 디자인 트랙 13차 (빠르게 숨기기 · 테마별 커스텀 이미지 · 던지기 범위) — v1.1.0
+- **빠르게 숨기기 단축키**(기본 `Alt + \`` = ALT + VK_OEM_3 0xC0)
+  - 잡기 단축키 인프라를 **2개 등록 구조로 일반화**: `RegisterCatchHotkey` → `RegisterHotkeys`,
+    핫키 ID 2개(`CatchHotkeyId`/`HideHotkeyId`), `ModifiersHeld(int mod)` 파라미터화,
+    저수준 마우스 훅 **하나**가 잡기·숨기기 두 트리거를 함께 판정(숨기기 우선 — 숨은 상태에선 잡기가 무의미).
+  - `ToggleQuickHide()` → `SlimeVisible` 반전. `SlimeVisible` 반영은 `ApplyVisibility()` 로 모아
+    **슬라임 + 놓아둔 당구공(ExtraBallWindow) + 파티클/타격문구 오버레이를 함께** 감춘다
+    (슬라임만 사라지면 숨긴 티가 남음). 표시 복귀 시 `_ownsBall` 을 존중(멀티 PC 에서 비소유면 안 띄움).
+  - 설정창 '단축키' 탭에 **2행**(잡기 / 빠르게 숨기기). 대기값을 현재 설정으로 초기화해
+    **한쪽만 바꿔 저장해도 다른 쪽이 지워지지 않는다.** `Key.Oem3` → `` ` `` 처럼 실제 글자로 표시(`KeyDisplayName`).
+- **테마별 커스텀 이미지(덧씌우기)** — 대상: **슬라임 · 당구공만**(볼 3종은 고유 디자인 유지, `SkinImageStore.Supports`).
+  - **저침습 설계**: 스킨 파일(5개)을 건드리지 않고 `SlimeWindow.xaml` 의 `SkinHost` **위에 레이어 한 겹**
+    (`CustomImageLayer`). 공 본체와 같은 원(`EllipseGeometry` center 48,48 / r 42)으로 클립하고
+    위에 구면 음영·광택을 다시 씌워 **스티커가 아니라 공 표면**으로 보이게 함.
+  - `Services/SkinImageStore.cs` — `%APPDATA%/Slimey/skins/<스킨>.png`. 고른 원본을 **복사·PNG 재인코딩**해
+    보관(원본을 옮기거나 지워도 안 깨짐), 긴 변 512 로 축소, 캐시 + 변경 시 무효화.
+  - `Views/SkinDrawWindow` — WPF 내장 `InkCanvas` 로 직접 그리기(10색·굵기 2~48·점 단위 지우개·되돌리기·
+    전체 지우기·배경 투명/흰색). 저장은 `DrawArea` **하나만** 512×512 로 렌더 → 안내 원·체커 배경은 밖에 두어 결과에 안 섞임.
+  - `AppSettings`: `SkinImages`(스킨명→원본 파일명, 빈 문자열=직접 그린 것) + `NotifySkinImagesChanged()`
+    (Dictionary 는 자동 통보가 없으므로 명시 호출 → 공·미리보기 갱신 + 디바운스 자동 저장),
+    `SkinImageEnabled`, `SkinImageScale`(0.3~1.6).
+  - 설정창 '테마' 탭: 지원 테마 선택 시에만 섹션 노출. **테마 카드 미리보기에도 커스텀 이미지가 반영**된다.
+- **던지기 가중치 2.0x → 10.0x**
+  - 그냥 슬라이더만 늘리면 `MaxThrowSpeed`(7000)에 걸려 마우스 700px/s 부터 포화 → **2.5x 이상이 무의미**했다.
+    상한을 20000 으로 올리되, `MaxSpeed` 가 **이펙트 세기 기준값으로도 쓰이던 것**을
+    `ImpactReferenceSpeed`(7000) 로 **분리** → 상한만 오르고 소리/파티클/찌그러짐/표정 임계는 이전과 동일.
+  - 반영처: `ImpactClassifier`, `SlimeAnimationController.Tick/OnImpact`, `SlimeWindow` 의 Flying/Dizzy 판정·잡기 반응.
+- **버그 수정(구현 중 발견)**: `BitmapImage` 에 `StreamSource` + `BitmapCreateOptions.IgnoreImageCache` 를
+  함께 주면 `UriSource` 가 없어 WPF 내부 `FinalizeCreation` 이 `ArgumentNullException` 으로 터진다
+  → 커스텀 이미지가 **항상 로드 실패**. `BitmapCacheOption.OnLoad` 만 사용하도록 수정(파일 잠금도 안 생김).
+- 검증: `dotnet build` 0경고/0오류 · **자동 하네스 94/94 PASS를 5회 반복 동일**
+  (던지기 1x/5x/10x 실측·상한 클램프, 이펙트 임계 회귀, 단축키 기본값·라벨·한쪽만 저장,
+   숨기기 실동작(슬라임·오버레이·당구공 동시 숨김/복귀), 이미지 Import/Save/Load/Remove 왕복 +
+   원본 삭제 후 로드, 덧씌우기 표시·크기·토글·볼 3종 제외, 설정창 3패널 실렌더, 그림창 렌더·저장 왕복,
+   **창 밖으로 밀린 버튼 없음**) · 실앱 실행 로그 오류 0 · **유휴 CPU 0%**.
+- 구현 중 하네스로 잡아 고친 UI 결함: 그림 그리기 창 높이가 부족해 **도구·저장 버튼이 화면 밖**으로
+  밀려 있었다 → 캔버스 320 축소 + 높이 700 + 스크롤 안전장치. (버튼 위치를 창 경계와 비교하는 검사를 하네스에 추가.)
+
+### 디자인 트랙 14차 (가중치 20x + 이펙트 위치 버그 2건) — v1.1.1
+- **던지기 가중치 10x → 20x**, 상한 `MaxThrowSpeed`/`MaxSpeed` 20000 → **40000 px/s**.
+  최악 프레임(dt 0.05s)에 2000px 이동 → substep 42분할. **터널링 없음 검증**(400프레임 × 40000px/s,
+  반발 1.0·마찰 0 최악 조건에서 전부 화면 안).
+- **버그 ①: 이펙트가 벽이 아니라 화면 안쪽에 떴다** ("가중치를 못 따라간다 / 화면 중간에 글자가 뜬다")
+  - 원인: `TriggerImpactEffects` 가 **물리 Update 가 끝난 뒤**의 `_physics.Position` 을 이펙트 원점으로 썼다.
+    한 프레임에 여러 substep 이 돌기 때문에 프레임 종료 위치는 충돌 접점에서 **한 프레임 이동량만큼** 떨어져 있다.
+    속도가 빠를수록 오차가 커져(최고속 최대 2000px) 벽에서 튕긴 문구가 화면 한복판에 떴다.
+  - 수정: `PhysicsStepResult.CollisionPosition` 추가 — 엔진이 **최대 세기 충돌이 일어난 순간의 위치**를 기록해
+    반환. 문구·파티클·쿠션 스파크 모두 이 값을 원점으로 쓴다.
+  - 검증: 30000px/s로 오른쪽 벽 충돌 → `CollisionPosition.X`=1823.8(벽 1824), 프레임 종료 위치는
+    **402px 안쪽**(옛 버그의 크기). 느릴 때는 차이 16px 이하(회귀 없음).
+    배선 검증: 종료 위치를 한복판(1000)으로 두고 접점(0)을 넘겼을 때 문구 Origin=(48,548) — 옛 코드면 1048.
+- **버그 ②: 멀리 떨어진 이펙트가 창 밖으로 잘렸다**
+  - 원인: 문구(1100px)·파티클(1300px) 오버레이는 성능상 **작은 고정 크기 창 하나**를 이동시켜 그리는데,
+    위치를 활성 이펙트들의 **무게중심**으로 잡았다. 공이 양쪽 벽을 번갈아 때리면 무게중심이
+    그 사이(화면 한복판)로 가버려 **양쪽 이펙트가 모두 창 밖으로 잘렸다.** 가중치를 올리면 훨씬 잦아진다.
+  - 수정: ⓐ 창 위치를 **경계 중심**(bounding box center)으로 변경 — 한쪽에 몰려도 치우치지 않는다.
+    ⓑ 불변식 "활성 이펙트는 항상 창 안"을 **발생 측에서** 보장: `HitTextSystem.MaxSpreadPx`(640) /
+    `ParticleSystem.MaxSpreadPx`(900) 를 넘기게 되면 오래된 것을 비운다.
+    문구는 1초 미만 피드백이라 **남겨서 잘리는 것보다 최신 타격점을 정확히 보여주는 게 낫다.**
+  - **창 리사이즈는 쓰지 않았다** — 레이어드 창 리사이즈는 ~100ms 동기 스톨(디자인 트랙 2차 실측)이라
+    처음 시도했던 "경계에 맞춰 창 크기 조절" 방식을 철회하고 위 불변식 방식으로 바꿨다.
+  - 검증: 무작위 벽 타격 120프레임 동안 **창 밖 문구 0개**. 파티클은 중력(2600px/s²)으로 스스로
+    퍼지므로 `MaxSpreadPx` 는 방출 시점 가드일 뿐 — 200프레임 최대 퍼짐 1007px 로 1300px 창 안에 들어옴(여유 293px).
+- 검증: `dotnet build` Debug/Release 0경고/0오류 · **자동 하네스 112/112 PASS를 6회 반복 동일** ·
+  실앱 ThrowPower=20 실행 로그 오류 0 · **유휴 CPU 0%**.

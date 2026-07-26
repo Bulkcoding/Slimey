@@ -64,12 +64,27 @@ public sealed class HitTextSystem
     public IReadOnlyList<HitText> Active => _items;
     public bool HasActive => _items.Count > 0;
 
+    /// <summary>활성 문구가 퍼질 수 있는 최대 범위(물리 px).
+    ///
+    /// 문구는 고정 크기(1100px) 오버레이 창 하나가 그리므로, 문구들이 이보다 넓게
+    /// 퍼지면 창 밖으로 잘려 아예 안 보인다(창 리사이즈는 레이어드 창에서 동기 스톨).
+    /// 공이 빠를수록 양쪽 벽을 번갈아 때려 이 상황이 잦아진다
+    /// → 새 문구가 이 범위를 벗어나게 만들면 **오래된 문구를 비운다.**
+    /// 문구는 1초 미만 피드백이라, 남겨서 잘리는 것보다 최신 타격점을 정확히 보여주는 게 낫다.
+    /// (1100 − 문구박스 320 − 여유 140 ≈ 640)</summary>
+    public const double MaxSpreadPx = 640.0;
+
     /// <summary>타격 지점에서 랜덤 문구 하나 띄우기.</summary>
     /// <param name="origin">중심(물리 픽셀).</param>
     /// <param name="power01">0~1 세기(글자 크기·색).</param>
     public void Spawn(Vector2 origin, double power01)
     {
         power01 = Math.Clamp(power01, 0, 1);
+
+        // 새 문구를 더했을 때 퍼짐이 한계를 넘으면 기존 문구를 비워 창 안에 유지한다.
+        if (_items.Count > 0 && WouldExceedSpread(origin))
+            _items.Clear();
+
         _items.Add(new HitText
         {
             Text = Words[_rng.Next(Words.Length)],
@@ -83,6 +98,22 @@ public sealed class HitTextSystem
 
         // 화면 폭주 방지: 오래된 것부터 제거
         if (_items.Count > 12) _items.RemoveAt(0);
+    }
+
+    /// <summary>origin 을 추가하면 활성 문구의 경계가 <see cref="MaxSpreadPx"/> 를 넘는가.</summary>
+    private bool WouldExceedSpread(Vector2 origin)
+    {
+        double minX = origin.X, maxX = origin.X;
+        double minY = origin.Y, maxY = origin.Y;
+        foreach (HitText h in _items)
+        {
+            double x = h.CurrentX, y = h.CurrentY;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+        return (maxX - minX) > MaxSpreadPx || (maxY - minY) > MaxSpreadPx;
     }
 
     /// <summary>deltaTime 진행. 수명 다한 문구 제거. 살아있으면 true.</summary>

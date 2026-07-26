@@ -1,0 +1,25 @@
+# Slimey 릴레이 서버 (Cloudflare Workers + Durable Objects)
+#
+# 배포 전 준비:
+#   1) npm install
+#   2) npx wrangler login            (Cloudflare 계정 로그인)
+#   3) npx wrangler deploy           (배포 → *.workers.dev URL 발급)
+#
+# 로컬 실행: npx wrangler dev  (ws://127.0.0.1:8787/room/<코드> 로 접속)
+
+name = "slimey-relay"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+# Durable Object 바인딩: 방(Room) 하나 = DO 인스턴스 하나.
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDurableObject"
+
+# SQLite 백엔드 DO → 무료 티어 사용 가능(0원 시작).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject"]
+
+[observability]
+enabled = true

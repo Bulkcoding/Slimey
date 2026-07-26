@@ -77,6 +77,42 @@
 
                 <!-- 스킨 호스트: 코드에서 선택된 스킨(UserControl)을 넣는다. -->
                 <ContentControl x:Name="SkinHost"/>
+
+                <!-- ═══ 테마별 커스텀 이미지(덧씌우기) ═══
+                     스킨 위에 한 겹 올린다 → 스킨 파일을 건드리지 않고 모든 테마에 적용.
+                     공 본체(Margin 6, 지름 84)와 같은 원으로 클립하고, 위에 구면 음영·광택을
+                     다시 씌워 "스티커"가 아니라 공 표면처럼 보이게 한다. -->
+                <Grid x:Name="CustomImageLayer" Visibility="Collapsed" IsHitTestVisible="False">
+                    <Grid.Clip>
+                        <EllipseGeometry Center="48,48" RadiusX="42" RadiusY="42"/>
+                    </Grid.Clip>
+
+                    <Image x:Name="CustomImage" Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                    <!-- 구면 볼륨(가장자리 음영) -->
+                    <Ellipse Margin="6">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Color="#00000000" Offset="0.0"/>
+                                <GradientStop Color="#00000000" Offset="0.62"/>
+                                <GradientStop Color="#38000000" Offset="0.88"/>
+                                <GradientStop Color="#6E000000" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+
+                    <!-- 광택 하이라이트 -->
+                    <Ellipse Width="26" Height="18" HorizontalAlignment="Left" VerticalAlignment="Top"
+                             Margin="22,16,0,0">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush>
+                                <GradientStop Color="#B0FFFFFF" Offset="0.0"/>
+                                <GradientStop Color="#00FFFFFF" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                </Grid>
             </Grid>
         </Viewbox>
 

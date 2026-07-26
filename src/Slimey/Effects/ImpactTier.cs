@@ -21,7 +21,7 @@ public static class ImpactClassifier
     /// <param name="impactSpeed">반전 직전 속도 크기(px/s).</param>
     public static ImpactTier Classify(double impactSpeed, AppSettings s)
     {
-        double maxSpeed = s.MaxSpeed <= 0 ? 1.0 : s.MaxSpeed;
+        double maxSpeed = s.ImpactReferenceSpeed <= 0 ? 1.0 : s.ImpactReferenceSpeed;
         double ratio = impactSpeed / maxSpeed;
 
         if (ratio < s.ImpactSoftFraction) return ImpactTier.None;
@@ -33,7 +33,7 @@ public static class ImpactClassifier
     /// <summary>0~1 정규화 세기(파티클 수·볼륨 스케일용).</summary>
     public static double Intensity01(double impactSpeed, AppSettings s)
     {
-        double maxSpeed = s.MaxSpeed <= 0 ? 1.0 : s.MaxSpeed;
+        double maxSpeed = s.ImpactReferenceSpeed <= 0 ? 1.0 : s.ImpactReferenceSpeed;
         return Math.Clamp(impactSpeed / maxSpeed, 0.0, 1.0);
     }
 }

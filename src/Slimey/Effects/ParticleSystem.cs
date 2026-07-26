@@ -35,6 +35,32 @@ public sealed class ParticleSystem
     public IReadOnlyList<Particle> Active => _particles;
     public bool HasActive => _particles.Count > 0;
 
+    /// <summary>활성 파티클이 퍼질 수 있는 최대 범위(물리 px).
+    ///
+    /// 파티클도 고정 크기(1300px) 오버레이 창 하나가 그리므로, 멀리 떨어진 두 번째 폭발이
+    /// 생기면 한쪽이 창 밖으로 잘린다(창 리사이즈는 레이어드 창에서 동기 스톨 → 금지).
+    /// 공이 빠를수록 양쪽 벽을 번갈아 때려 잦아진다 → 새 폭발이 범위를 넘기면 기존 것을 비운다.
+    /// (1300 − 파티클 여유 ≈ 900)</summary>
+    public const double MaxSpreadPx = 900.0;
+
+    /// <summary>origin 에서 새로 방출하기 전, 퍼짐 한계를 넘으면 기존 파티클을 비운다.</summary>
+    private void EnsureSpread(Vector2 origin)
+    {
+        if (_particles.Count == 0) return;
+
+        double minX = origin.X, maxX = origin.X;
+        double minY = origin.Y, maxY = origin.Y;
+        foreach (Particle p in _particles)
+        {
+            if (p.Position.X < minX) minX = p.Position.X;
+            if (p.Position.X > maxX) maxX = p.Position.X;
+            if (p.Position.Y < minY) minY = p.Position.Y;
+            if (p.Position.Y > maxY) maxY = p.Position.Y;
+        }
+        if ((maxX - minX) > MaxSpreadPx || (maxY - minY) > MaxSpreadPx)
+            _particles.Clear();
+    }
+
     /// <summary>충돌/펀치 지점에서 파티클 방출.</summary>
     /// <param name="origin">방출 중심(물리 픽셀).</param>
     /// <param name="intensity01">0~1 세기(개수·속도 스케일).</param>
@@ -47,6 +73,7 @@ public sealed class ParticleSystem
             _settings.ParticleBaseCount +
             (_settings.ParticleMaxCount - _settings.ParticleBaseCount) * intensity01);
         if (count <= 0) return;
+        EnsureSpread(origin);
 
         double speedMin = _settings.ParticleSpeedMin;
         double speedMax = _settings.ParticleSpeedMax;
@@ -87,6 +114,7 @@ public sealed class ParticleSystem
             _settings.ParticleBaseCount +
             (_settings.ParticleMaxCount - _settings.ParticleBaseCount) * intensity01);
         if (count <= 0) return;
+        EnsureSpread(origin);
 
         for (int i = 0; i < count; i++)
         {
@@ -122,6 +150,7 @@ public sealed class ParticleSystem
             _settings.ParticleBaseCount +
             (_settings.ParticleMaxCount - _settings.ParticleBaseCount) * intensity01);
         if (count <= 0) return;
+        EnsureSpread(origin);
 
         for (int i = 0; i < count; i++)
         {

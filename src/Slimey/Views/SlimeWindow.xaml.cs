@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -8,6 +9,7 @@ using System.Windows.Media;
 using Slimey.Animation;
 using Slimey.Effects;
 using Slimey.Models;
+using Slimey.Network;
 using Slimey.Physics;
 using Slimey.Services;
 using Slimey.Views.Skins;
@@ -63,9 +65,9 @@ public partial class SlimeWindow : Window
     // 표정 상태 (요청: 속도/충돌에 따른 표정 변경)
     private SlimeExpression _expression = SlimeExpression.Normal;
     private double _dizzyUntil;                        // 이 시각(초)까지 Dizzy 유지
-    private const double FlyingSpeedFraction = 0.28;   // MaxSpeed 대비 이 이상이면 Flying
+    private const double FlyingSpeedFraction = 0.28;   // ImpactReferenceSpeed 대비 이 이상이면 Flying
     private const double DizzyDurationSeconds = 0.9;    // 강한 충돌 후 Dizzy 지속
-    private const double DizzyImpactFraction = 0.55;    // MaxSpeed 대비 이 이상 충돌이면 Dizzy
+    private const double DizzyImpactFraction = 0.55;    // ImpactReferenceSpeed 대비 이 이상 충돌이면 Dizzy
 
     // Phase 4: 타격감(효과음·파티클). 파티클 렌더는 전 모니터 오버레이가 담당.
     private readonly AudioService _audio;
@@ -75,6 +77,20 @@ public partial class SlimeWindow : Window
     // 타격 문구("Hit!" 등, 메이플식) — 젤리 스킨 전용
     private readonly HitTextSystem _hitText;
     private HitTextOverlayWindow? _hitTextOverlay;
+
+    // ── 멀티 PC 인터넷 확장(릴레이) ─────────────────────────
+    // 설정(방 코드/시크릿/서버)이 있을 때만 활성. 없으면 순수 로컬 토이로 동작(기존과 동일).
+    private AuthService _auth = null!;
+    private RelayClient? _relay;
+    private BallHandoffCoordinator? _coord;
+    private NetworkedWalkableArea? _netArea;
+    private bool _networked;
+    private string _selfNodeId = "";
+    private bool _connected;      // 서버 WSS 연결됨
+    private bool _ownsBall = true; // 이 PC가 공을 소유(표시)하는가. 서버 프레즌스로 갱신.
+
+    /// <summary>릴레이 연결 상태 변화(설정창 표시용).</summary>
+    public event Action<RelayState>? RelayStateChanged;
 
     public SlimeWindow(AppSettings settings, MonitorLayoutService monitors)
     {
@@ -91,6 +107,10 @@ public partial class SlimeWindow : Window
         _tracker = new ThrowInputTracker(_settings);
         // 충돌 판정은 MonitorLayoutService(IWalkableArea)에 위임 → 멀티 모니터 대응.
         _physics = new SlimePhysicsEngine(_settings, _monitors);
+
+        // 릴레이 설정이 있으면 네트워크 확장 활성화(연결된 엣지 통과 허용 + 핸드오프 조정자).
+        _auth = AuthService.Load();
+        if (_auth.IsConfigured) SetupNetworking();
 
         _audio = new AudioService(_settings);
         _particles = new ParticleSystem(_settings);
@@ -126,14 +146,18 @@ public partial class SlimeWindow : Window
         _hwnd = new WindowInteropHelper(this).Handle;
         _hwndSource = HwndSource.FromHwnd(_hwnd);
         _hwndSource?.AddHook(WndProc);
-        RegisterCatchHotkey();
+        RegisterHotkeys();
+
+        // 릴레이 서버 연결 시작(설정돼 있을 때만). NAT/방화벽 무관(아웃바운드 WSS).
+        _relay?.Start();
 
         // 시작은 정지 상태이므로 렌더 루프를 돌리지 않는다(CPU 절감).
     }
 
-    // ── 전역 잡기 단축키 ────────────────────────────────────
+    // ── 전역 단축키(잡기 / 빠르게 숨기기) ───────────────────
     private const int WM_HOTKEY = 0x0312;
     private const int CatchHotkeyId = 0xB001;
+    private const int HideHotkeyId = 0xB002;
     private const uint MOD_NOREPEAT = 0x4000;
     private IntPtr _hwnd;
     private HwndSource? _hwndSource;
@@ -154,7 +178,7 @@ public partial class SlimeWindow : Window
     [DllImport("kernel32.dll")] private static extern IntPtr GetModuleHandle(string? name);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int vk);
 
-    private void RegisterCatchHotkey()
+    private void RegisterHotkeys()
     {
         if (_hwnd == IntPtr.Zero) return;
         // 키보드 트리거
@@ -162,9 +186,13 @@ public partial class SlimeWindow : Window
         if (_settings.CatchHotkeyVk != 0)
             RegisterHotKey(_hwnd, CatchHotkeyId, (uint)_settings.CatchHotkeyMod | MOD_NOREPEAT, (uint)_settings.CatchHotkeyVk);
 
-        // 마우스 트리거
+        UnregisterHotKey(_hwnd, HideHotkeyId);
+        if (_settings.HideHotkeyVk != 0)
+            RegisterHotKey(_hwnd, HideHotkeyId, (uint)_settings.HideHotkeyMod | MOD_NOREPEAT, (uint)_settings.HideHotkeyVk);
+
+        // 마우스 트리거 — 둘 중 하나라도 쓰면 훅 하나로 함께 처리
         RemoveMouseTrigger();
-        if (_settings.CatchHotkeyMouse != 0)
+        if (_settings.CatchHotkeyMouse != 0 || _settings.HideHotkeyMouse != 0)
         {
             _mouseProc = MouseHookProc;
             _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseProc, GetModuleHandle(null), 0);
@@ -177,9 +205,8 @@ public partial class SlimeWindow : Window
         _mouseProc = null;
     }
 
-    private bool ModifiersHeld()
+    private static bool ModifiersHeld(int m)
     {
-        int m = _settings.CatchHotkeyMod;
         bool Down(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
         if ((m & 2) != 0 && !Down(0x11)) return false; // Ctrl
         if ((m & 4) != 0 && !Down(0x10)) return false; // Shift
@@ -188,16 +215,32 @@ public partial class SlimeWindow : Window
         return true;
     }
 
+    private static int MouseMsgFor(int button) => button switch
+    {
+        2 => WM_RBUTTONDOWN,
+        3 => WM_MBUTTONDOWN,
+        _ => WM_LBUTTONDOWN,
+    };
+
     private IntPtr MouseHookProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0)
         {
             int msg = (int)wParam;
-            int wantMsg = _settings.CatchHotkeyMouse switch { 2 => WM_RBUTTONDOWN, 3 => WM_MBUTTONDOWN, _ => WM_LBUTTONDOWN };
-            if (msg == wantMsg && ModifiersHeld())
+            // 숨기기를 먼저 본다: 숨겨진 상태에선 잡기가 의미 없으므로 우선순위를 준다.
+            if (_settings.HideHotkeyMouse != 0
+                && msg == MouseMsgFor(_settings.HideHotkeyMouse)
+                && ModifiersHeld(_settings.HideHotkeyMod))
+            {
+                try { ToggleQuickHide(); } catch { }
+                return (IntPtr)1; // 삼킴(다른 창으로 전달 안 함)
+            }
+            if (_settings.CatchHotkeyMouse != 0
+                && msg == MouseMsgFor(_settings.CatchHotkeyMouse)
+                && ModifiersHeld(_settings.CatchHotkeyMod))
             {
                 try { CatchToCursor(); } catch { }
-                return (IntPtr)1; // 삼킴(다른 창으로 전달 안 함)
+                return (IntPtr)1;
             }
         }
         return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
@@ -205,12 +248,36 @@ public partial class SlimeWindow : Window
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == WM_HOTKEY && wParam.ToInt32() == CatchHotkeyId)
+        if (msg == WM_HOTKEY)
         {
-            CatchToCursor();
-            handled = true;
+            switch (wParam.ToInt32())
+            {
+                case CatchHotkeyId: CatchToCursor(); handled = true; break;
+                case HideHotkeyId: ToggleQuickHide(); handled = true; break;
+            }
         }
         return IntPtr.Zero;
+    }
+
+    /// <summary>빠르게 숨기기: 슬라임과 부수 요소(당구공·이펙트 오버레이)를 한 번에 감추거나 되돌린다.</summary>
+    private void ToggleQuickHide() => _settings.SlimeVisible = !_settings.SlimeVisible;
+
+    /// <summary>SlimeVisible 에 맞춰 부수 창들까지 함께 감춘다(숨기기가 "완전히" 사라지게).</summary>
+    private void ApplyVisibility()
+    {
+        bool show = _settings.SlimeVisible;
+        if (show && _ownsBall) Show();
+        else if (!show) Hide();
+
+        // 당구 3/4구와 이펙트 오버레이도 함께 — 슬라임만 사라지면 숨긴 티가 남는다.
+        foreach (var b in _extraBalls)
+        {
+            try { if (show) b.Show(); else b.Hide(); } catch { }
+        }
+        if (show) { _overlay?.Show(); _hitTextOverlay?.Show(); }
+        else { _overlay?.Hide(); _hitTextOverlay?.Hide(); }
+
+        if (show) EnsureRendering();
     }
 
     /// <summary>단축키: 슬라임을 마우스 커서 위치로 데려와 정지(잡힘). 빠르게 날아가도 즉시 회수.</summary>
@@ -225,7 +292,7 @@ public partial class SlimeWindow : Window
         _physics.SurfaceSpin = 0;
         _dragSpin = 0;
         _physics.SetPositionClamped(cursor - new Vector2(half, half));
-        _animation.OnImpact(_settings.MaxSpeed * 0.25); // 잡히는 작은 반응
+        _animation.OnImpact(_settings.ImpactReferenceSpeed * 0.25); // 잡히는 작은 반응
         ApplyWindowPosition();
         EnsureRendering();
     }
@@ -629,9 +696,16 @@ public partial class SlimeWindow : Window
         if (r.Collided)
         {
             _animation.OnImpact(r.MaxImpactSpeed);
-            TriggerImpactEffects(r.MaxImpactSpeed, r.CollisionNormal);
-            if (r.MaxImpactSpeed > _settings.MaxSpeed * DizzyImpactFraction)
+            TriggerImpactEffects(r.MaxImpactSpeed, r.CollisionNormal, r.CollisionPosition);
+            if (r.MaxImpactSpeed > _settings.ImpactReferenceSpeed * DizzyImpactFraction)
                 _dizzyUntil = now + DizzyDurationSeconds;
+        }
+
+        // 네트워크: 공이 연결된 엣지를 넘었으면 다른 PC로 핸드오프(넘기고 공을 숨김).
+        if (_networked && _connected && _ownsBall && _coord!.CheckAndSendHandoff())
+        {
+            HideBallForHandoff();
+            return;
         }
 
         ApplyWindowPosition();
@@ -641,7 +715,7 @@ public partial class SlimeWindow : Window
         // 표정: 어질(충돌 직후) > 신남(빠름) > 평상
         SetExpression(
             now < _dizzyUntil ? SlimeExpression.Dizzy
-            : _physics.Velocity.Length > _settings.MaxSpeed * FlyingSpeedFraction ? SlimeExpression.Flying
+            : _physics.Velocity.Length > _settings.ImpactReferenceSpeed * FlyingSpeedFraction ? SlimeExpression.Flying
             : SlimeExpression.Normal);
 
         // 완전히 멈추고 형태도 안정되고 파티클도 없고 표정도 원상복귀되면 루프 정지(유휴).
@@ -650,13 +724,15 @@ public partial class SlimeWindow : Window
     }
 
     /// <summary>충돌 세기를 단계로 분류해 스킨에 맞는 이펙트를 발동한다.</summary>
-    private void TriggerImpactEffects(double impactSpeed, Vector2 normal)
+    /// <param name="hitPos">충돌 순간의 슬라임 top-left(물리 픽셀). 프레임 종료 위치를 쓰면
+    /// 빠를 때 한 프레임 이동량(최대 MaxSpeed×MaxFrameDelta)만큼 빗나가 화면 안쪽에 이펙트가 뜬다.</param>
+    private void TriggerImpactEffects(double impactSpeed, Vector2 normal, Vector2 hitPos)
     {
         ImpactTier tier = ImpactClassifier.Classify(impactSpeed, _settings);
         if (tier == ImpactTier.None) return;
 
         double intensity = ImpactClassifier.Intensity01(impactSpeed, _settings);
-        Vector2 center = _physics.Position + new Vector2(_settings.SlimeSize / 2.0, _settings.SlimeSize / 2.0);
+        Vector2 center = hitPos + new Vector2(_settings.SlimeSize / 2.0, _settings.SlimeSize / 2.0);
 
         if (_settings.Skin != SlimeSkinKind.Jelly)
         {
@@ -732,8 +808,7 @@ public partial class SlimeWindow : Window
                 if (!_settings.Paused) EnsureRendering();
                 break;
             case nameof(AppSettings.SlimeVisible):
-                if (_settings.SlimeVisible) Show();
-                else Hide();
+                ApplyVisibility();
                 break;
             case nameof(AppSettings.Skin):
                 ClearExtraBalls(); // 테마(스킨) 바꾸면 놓았던 3/4구 당구공도 함께 치운다
@@ -742,10 +817,18 @@ public partial class SlimeWindow : Window
             case nameof(AppSettings.CueStickMode):
                 UpdateSpinAimVisibility();
                 break;
+            case nameof(AppSettings.SkinImages):
+            case nameof(AppSettings.SkinImageEnabled):
+            case nameof(AppSettings.SkinImageScale):
+                ApplyCustomImage();
+                break;
             case nameof(AppSettings.CatchHotkeyMod):
             case nameof(AppSettings.CatchHotkeyVk):
             case nameof(AppSettings.CatchHotkeyMouse):
-                RegisterCatchHotkey();
+            case nameof(AppSettings.HideHotkeyMod):
+            case nameof(AppSettings.HideHotkeyVk):
+            case nameof(AppSettings.HideHotkeyMouse):
+                RegisterHotkeys();
                 break;
             case nameof(AppSettings.SlimeSize):
                 ApplyWindowSize();
@@ -772,6 +855,24 @@ public partial class SlimeWindow : Window
         _expression = SlimeExpression.Normal; // 새 스킨은 기본 표정으로 시작
         UpdateSkinBehavior();
         UpdateSpinAimVisibility();
+        ApplyCustomImage();
+    }
+
+    /// <summary>현재 테마의 커스텀 이미지를 공 위에 덧씌운다(없거나 끄면 숨김).</summary>
+    private void ApplyCustomImage()
+    {
+        var img = _settings.SkinImageEnabled && SkinImageStore.Supports(_settings.Skin)
+            ? SkinImageStore.Load(_settings.Skin)
+            : null;
+
+        CustomImage.Source = img;
+        CustomImageLayer.Visibility = img != null ? Visibility.Visible : Visibility.Collapsed;
+        if (img == null) return;
+
+        // 디자인 캔버스(96) 기준 공 지름은 84. 배율 1.0 = 공에 꽉 맞춤, 초과분은 원으로 클립된다.
+        double d = 84.0 * Math.Clamp(_settings.SkinImageScale, 0.2, 2.0);
+        CustomImage.Width = d;
+        CustomImage.Height = d;
     }
 
     /// <summary>표정 변경(스킨이 표정을 지원할 때만). 상태가 바뀔 때만 반영.</summary>
@@ -942,11 +1043,202 @@ public partial class SlimeWindow : Window
         if (cueChanged) EnsureRendering(); // 수구가 맞았으면 수구 루프 깨우기
     }
 
+    // ── 멀티 PC 릴레이 처리 ─────────────────────────────────
+    /// <summary>설정창 표시용: 현재 릴레이 설정/상태/링크.</summary>
+    public AuthService RelayAuth => _auth;
+    public RelayState RelayState => _relay?.State ?? RelayState.Disabled;
+    public IReadOnlyList<EdgeLinkDto> CurrentLinks => _auth.Links;
+
+    /// <summary>릴레이 활성화(설정 존재 시). 물리 area 를 네트워크 인지형으로 교체.</summary>
+    private void SetupNetworking()
+    {
+        _networked = true;
+        _selfNodeId = _auth.NodeId;
+        _netArea = new NetworkedWalkableArea(_monitors);
+        _physics.Area = _netArea; // 연결된 엣지로는 나가도 유효 → 반사 대신 핸드오프
+        _relay = new RelayClient(_auth);
+        _coord = new BallHandoffCoordinator(
+            _physics, _settings, _netArea,
+            () => { var vb = _monitors.VirtualBounds; return new Bounds(vb.Left, vb.Top, vb.Width, vb.Height); },
+            env => { if (_relay != null) _ = _relay.SendAsync(env); })
+        { SelfNodeId = _selfNodeId };
+        if (_auth.Links.Count > 0) _coord.SetLinks(_auth.Links);
+        _relay.MessageReceived += env => Dispatcher.InvokeAsync(() => OnRelayMessage(env));
+        _relay.StateChanged += st => Dispatcher.InvokeAsync(() => OnRelayState(st));
+    }
+
+    /// <summary>릴레이 비활성화. 로컬 판정으로 복귀하고 공을 다시 로컬 표시.</summary>
+    private void TeardownNetworking()
+    {
+        var relay = _relay;
+        _relay = null;
+        if (relay != null) { _ = relay.StopAsync(); relay.Dispose(); }
+        _coord = null;
+        _netArea = null;
+        _networked = false;
+        _connected = false;
+        _physics.Area = _monitors;
+        if (!_ownsBall) { _ownsBall = true; if (_settings.SlimeVisible) Show(); EnsureRendering(); }
+    }
+
+    /// <summary>설정창이 <see cref="RelayAuth"/> 값을 바꾼 뒤 호출. 저장 후 네트워킹 재초기화.</summary>
+    public void ApplyRelaySettings()
+    {
+        _auth.Save();
+        TeardownNetworking();
+        RelayStateChanged?.Invoke(Network.RelayState.Disabled);
+        if (_auth.IsConfigured)
+        {
+            SetupNetworking();
+            _relay?.Start();
+        }
+    }
+
+    /// <summary>
+    /// 방 참여 시 링크 병합. <b>자기 노드에서 나가는 링크는 이 PC가 권위</b>를 갖고,
+    /// 다른 노드의 링크는 서버 것을 그대로 보존한다. 서버와 달라지면 병합 결과를 방에 배포.
+    /// (이렇게 해야 나중에 접속한 PC 의 매핑이 먼저 접속한 PC 의 매핑에 덮이지 않는다.)
+    /// </summary>
+    private void MergeLinksOnJoin(List<EdgeLinkDto> serverLinks)
+    {
+        var merged = LinkMerge.Merge(_selfNodeId, _auth.Links, serverLinks);
+        _auth.Links = merged;
+        _coord?.SetLinks(merged);
+
+        if (!LinkMerge.Same(merged, serverLinks) && _relay != null)
+        {
+            _ = _relay.SendAsync(new Envelope
+            {
+                Type = MsgType.RoomConfig, From = _selfNodeId,
+                Data = RelayJson.ToElement(new RoomConfigData { Links = merged }),
+            });
+        }
+    }
+
+    /// <summary>엣지 매핑을 저장하고 서버(방 전체)에 배포.</summary>
+    public void PushRoomConfig(IReadOnlyList<EdgeLinkDto> links)
+    {
+        _auth.Links = links.ToList();
+        _auth.Save();
+        _coord?.SetLinks(_auth.Links);
+        if (_relay != null)
+        {
+            _ = _relay.SendAsync(new Envelope
+            {
+                Type = MsgType.RoomConfig,
+                From = _selfNodeId,
+                Data = RelayJson.ToElement(new RoomConfigData { Links = _auth.Links }),
+            });
+        }
+    }
+
+    private void OnRelayState(RelayState st)
+    {
+        RelayStateChanged?.Invoke(st);
+        _connected = st == RelayState.Connected;
+        // 서버가 끊기면(장애/오프라인) 이 PC가 공을 로컬로 표시해 토이를 계속 쓸 수 있게 한다.
+        // 재연결 시 WELCOME/PRESENCE 로 소유권이 다시 동기화된다.
+        if (!_connected && !_ownsBall) GainBall(spawnAtCenter: false);
+    }
+
+    private void OnRelayMessage(Envelope env)
+    {
+        switch (env.Type)
+        {
+            case MsgType.Welcome:
+                if (env.DataAs<WelcomeData>() is { } w)
+                {
+                    _selfNodeId = string.IsNullOrEmpty(w.NodeId) ? _selfNodeId : w.NodeId;
+                    if (_coord != null) _coord.SelfNodeId = _selfNodeId;
+                    MergeLinksOnJoin(w.Links);
+                    ApplyOwnership(w.Owner);
+                }
+                break;
+
+            case MsgType.Presence:
+                if (env.DataAs<PresenceData>() is { } p) ApplyOwnership(p.Owner);
+                break;
+
+            case MsgType.RoomConfig:
+                if (env.DataAs<RoomConfigData>() is { } cfg) { _auth.Links = cfg.Links; _coord?.SetLinks(cfg.Links); }
+                break;
+
+            case MsgType.Handoff:
+                // 다른 PC가 공을 넘겨옴 → 물리 주입 + ACK. 성공 시 표시.
+                if (_coord?.ApplyIncoming(env) == true) GainBall(spawnAtCenter: false);
+                break;
+
+            case MsgType.HandoffResult:
+                if (env.DataAs<HandoffResultData>() is { } res && _coord != null)
+                {
+                    switch (_coord.OnResult(res))
+                    {
+                        case BallHandoffCoordinator.ResultKind.Released:
+                            LoseBall();                       // 상대가 받음 → 공 해제
+                            break;
+                        case BallHandoffCoordinator.ResultKind.Reflected:
+                            ShowBall();
+                            EnsureRendering();                // 실패 → 반사로 회수, 계속 표시
+                            break;
+                    }
+                }
+                break;
+
+            case MsgType.Error:
+                if (env.DataAs<ErrorData>() is { } err)
+                    Logger.Info($"Relay error: {err.Code} {err.Message}");
+                break;
+        }
+    }
+
+    /// <summary>서버가 알려준 소유자에 맞춰 이 PC의 공 표시/숨김을 동기화.</summary>
+    private void ApplyOwnership(string? owner)
+    {
+        bool mine = owner != null && owner == _selfNodeId;
+        if (mine && !_ownsBall) GainBall(spawnAtCenter: true);   // (재)소유 획득 — 이양 등
+        else if (!mine && _ownsBall) LoseBall();
+        _ownsBall = mine;
+    }
+
+    private void GainBall(bool spawnAtCenter)
+    {
+        _ownsBall = true;
+        if (spawnAtCenter) ResetPositionToCenter();
+        if (_settings.SlimeVisible) Show();
+        ApplyWindowPosition();
+        EnsureRendering();
+    }
+
+    private void ShowBall()
+    {
+        if (_settings.SlimeVisible) Show();
+        ApplyWindowPosition();
+    }
+
+    private void LoseBall()
+    {
+        _ownsBall = false;
+        Hide();
+        StopRendering();
+    }
+
+    /// <summary>핸드오프 전송 후: 공은 다른 PC로 갔으므로 숨기고 유휴. 소유권은 결과 대기.</summary>
+    private void HideBallForHandoff()
+    {
+        Hide();
+        StopRendering();
+    }
+
     // ── 정리 ────────────────────────────────────────────────
     public void ShutdownCleanup()
     {
         StopRendering();
-        if (_hwnd != IntPtr.Zero) UnregisterHotKey(_hwnd, CatchHotkeyId);
+        _relay?.Dispose();
+        if (_hwnd != IntPtr.Zero)
+        {
+            UnregisterHotKey(_hwnd, CatchHotkeyId);
+            UnregisterHotKey(_hwnd, HideHotkeyId);
+        }
         RemoveMouseTrigger();
         _hwndSource?.RemoveHook(WndProc);
         _settings.PropertyChanged -= OnSettingsChanged;
