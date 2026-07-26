@@ -32,8 +32,13 @@ public partial class HitTextOverlayWindow : Window
     private readonly List<Pop> _pool = new(16);
 
     private const double BoxW = 320, BoxH = 120;
+
+    /// <summary>따라다니는 창 크기(물리 px). 리사이즈는 레이어드 창에서 동기 스톨을 유발하므로 고정.
+    /// 이 크기가 <see cref="HitTextSystem.MaxSpreadPx"/> 의 근거다(퍼짐 + 문구 박스가 안에 들어와야 함).</summary>
     private const double FollowSizePx = 1100.0;
+
     private double _originPxX, _originPxY;
+    private readonly double _sizePxW = FollowSizePx, _sizePxH = FollowSizePx;
 
     #region Win32 클릭 통과
     private const int GWL_EXSTYLE = -20;
@@ -78,11 +83,11 @@ public partial class HitTextOverlayWindow : Window
 
     private void ApplyBounds()
     {
-        Width = FollowSizePx / _dpiScaleX;
-        Height = FollowSizePx / _dpiScaleY;
+        Width = _sizePxW / _dpiScaleX;
+        Height = _sizePxH / _dpiScaleY;
         Rect wa = _monitors.PrimaryWorkingArea;
-        _originPxX = wa.Left + (wa.Width - FollowSizePx) / 2.0;
-        _originPxY = wa.Top + (wa.Height - FollowSizePx) / 2.0;
+        _originPxX = wa.Left + (wa.Width - _sizePxW) / 2.0;
+        _originPxY = wa.Top + (wa.Height - _sizePxH) / 2.0;
         Left = _originPxX / _dpiScaleX;
         Top = _originPxY / _dpiScaleY;
     }
@@ -145,11 +150,24 @@ public partial class HitTextOverlayWindow : Window
         int n = items.Count;
         if (n > 0)
         {
-            double cx = 0, cy = 0;
-            for (int i = 0; i < n; i++) { cx += items[i].CurrentX; cy += items[i].CurrentY; }
-            cx /= n; cy /= n;
-            _originPxX = cx - FollowSizePx / 2.0;
-            _originPxY = cy - FollowSizePx / 2.0;
+            // 창은 고정 크기를 유지하고(리사이즈는 레이어드 창에서 동기 스톨) 이동만 한다.
+            // 무게중심이 아니라 **경계 중심**에 놓는다 — 무게중심은 문구가 한쪽에 몰릴 때
+            // 치우쳐서 반대쪽 문구가 창 밖으로 잘린다.
+            // "모든 활성 문구가 창 안에 들어온다"는 불변식은 HitTextSystem 이
+            // 퍼짐 한계(MaxSpreadPx)를 넘는 순간 오래된 문구를 비워서 보장한다.
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+            for (int i = 0; i < n; i++)
+            {
+                double x = items[i].CurrentX, y = items[i].CurrentY;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+
+            _originPxX = (minX + maxX) / 2.0 - _sizePxW / 2.0;
+            _originPxY = (minY + maxY) / 2.0 - _sizePxH / 2.0;
             Left = _originPxX / _dpiScaleX;
             Top = _originPxY / _dpiScaleY;
         }

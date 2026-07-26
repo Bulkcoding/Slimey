@@ -26,12 +26,16 @@ public sealed class SettingsStore : IDisposable
 
     private const int DebounceMs = 400;
 
+    /// <summary>프로필 이름(--profile). 비우면 settings.json, 지정 시 settings.&lt;profile&gt;.json.</summary>
+    public static string Profile { get; set; } = "";
+
     public SettingsStore()
     {
         string dir = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Slimey");
         Directory.CreateDirectory(dir);
-        _path = System.IO.Path.Combine(dir, "settings.json");
+        _path = System.IO.Path.Combine(dir,
+            string.IsNullOrWhiteSpace(Profile) ? "settings.json" : $"settings.{Profile}.json");
     }
 
     /// <summary>저장된 설정을 읽는다. 없거나 손상 시 기본값 반환.</summary>

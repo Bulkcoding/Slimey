@@ -19,6 +19,11 @@ public readonly struct PhysicsStepResult
 
     /// <summary>최대 세기 충돌의 벽 법선(플레이 영역 안쪽 방향). 방향성 이펙트용.</summary>
     public Vector2 CollisionNormal { get; init; }
+
+    /// <summary>최대 세기 충돌이 일어난 순간의 슬라임 top-left 위치(물리 픽셀).
+    /// 프레임 종료 위치와 다르다 — 빠를수록 한 프레임에 멀리 가므로,
+    /// 이펙트(파티클·문구·스파크)는 반드시 이 값을 써야 벽에 붙어 나온다.</summary>
+    public Vector2 CollisionPosition { get; init; }
 }
 
 /// <summary>
@@ -135,6 +140,7 @@ public sealed class SlimePhysicsEngine
         bool collided = false;
         double maxImpact = 0;
         Vector2 normal = Vector2.Zero;
+        Vector2 hitPos = Position;   // 최대 세기 충돌 순간의 위치(프레임 끝 위치와 다름)
 
         for (int i = 0; i < steps; i++)
         {
@@ -157,6 +163,7 @@ public sealed class SlimePhysicsEngine
                     {
                         maxImpact = impactX;
                         normal = new Vector2(-Math.Sign(dx), 0); // 진행 반대 = 안쪽
+                        hitPos = Position;                        // 벽에 닿은 그 지점
                     }
                     Velocity = Velocity.WithX(-Velocity.X * EffRestitution);
                     // 스핀이 벽을 물어 접선(세로) 방향으로 튀고, 스핀은 소모된다.
@@ -187,6 +194,7 @@ public sealed class SlimePhysicsEngine
                     {
                         maxImpact = impactY;
                         normal = new Vector2(0, -Math.Sign(dy)); // 진행 반대 = 안쪽
+                        hitPos = Position;                        // 벽에 닿은 그 지점
                     }
                     Velocity = Velocity.WithY(-Velocity.Y * EffRestitution);
                     // 스핀이 벽을 물어 접선(가로) 방향으로 튀고, 스핀은 소모된다.
@@ -244,6 +252,7 @@ public sealed class SlimePhysicsEngine
             MaxImpactSpeed = maxImpact,
             Sleeping = sleeping,
             CollisionNormal = normal,
+            CollisionPosition = hitPos,
         };
     }
 

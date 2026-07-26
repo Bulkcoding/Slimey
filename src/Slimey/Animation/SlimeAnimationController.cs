@@ -64,7 +64,7 @@ public sealed class SlimeAnimationController
         if (speed > 1.0)
         {
             // 이동 방향으로 늘어나고 수직으로 납작해진다.
-            double t = Math.Clamp(speed / _settings.MaxSpeed, 0, 1);
+            double t = Math.Clamp(speed / _settings.ImpactReferenceSpeed, 0, 1);
             double stretch = t * _settings.MaxStretch * _settings.Softness;
             _tgtX = 1.0 + stretch;   // 진행축(로컬 X) 늘림
             _tgtY = 1.0 - stretch * 0.6;
@@ -90,7 +90,7 @@ public sealed class SlimeAnimationController
     public void OnImpact(double impactSpeed)
     {
         if (Rigid) return; // 단단한 스킨은 찌그러지지 않음
-        double t = Math.Clamp(impactSpeed / _settings.MaxSpeed, 0, 1);
+        double t = Math.Clamp(impactSpeed / _settings.ImpactReferenceSpeed, 0, 1);
         double f = t * _settings.MaxStretch * _settings.Softness * 1.5;
         // 진행축으로 퍼지고 수직으로 눌린다.
         _curX = 1.0 + f;

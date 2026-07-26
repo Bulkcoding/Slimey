@@ -35,11 +35,16 @@ public sealed class AppSettings : INotifyPropertyChanged
     private double _restitution = 0.7;
     public double Restitution { get => _restitution; set => Set(ref _restitution, value); }
 
-    /// <summary>관성 이동 최대 속도(px/s). 폭주 방지 상한.</summary>
-    [JsonIgnore] public double MaxSpeed { get; set; } = 7000.0;
+    /// <summary>관성 이동 최대 속도(px/s). 폭주 방지 상한.
+    /// 이펙트 세기 기준이 아니라 순수 상한이다(기준은 <see cref="ImpactReferenceSpeed"/>).</summary>
+    [JsonIgnore] public double MaxSpeed { get; set; } = 40000.0;
 
     /// <summary>던질 때 계산되는 초기 속도 상한(px/s). 쎄게 던지면 팡팡 튀도록 높게.</summary>
-    [JsonIgnore] public double MaxThrowSpeed { get; set; } = 7000.0;
+    [JsonIgnore] public double MaxThrowSpeed { get; set; } = 40000.0;
+
+    /// <summary>충돌 세기·찌그러짐·표정을 0~1 로 정규화할 때 쓰는 기준 속도(px/s).
+    /// MaxSpeed 와 분리해 둔다 — 상한을 올려도 이펙트가 터지는 임계는 그대로 유지되도록.</summary>
+    [JsonIgnore] public double ImpactReferenceSpeed { get; set; } = 7000.0;
 
     /// <summary>던지기 가중치. 계산된 마우스 속도에 곱한다. 1.0 = 실제 마우스 속도 그대로.</summary>
     private double _throwPower = 1.0;
@@ -152,6 +157,18 @@ public sealed class AppSettings : INotifyPropertyChanged
     /// </summary>
     private int _basketballAimVk = 0x10;
     public int BasketballAimVk { get => _basketballAimVk; set => Set(ref _basketballAimVk, value); }
+    // ── 빠르게 숨기기 단축키(전역) ──────────────────────────
+    /// <summary>숨기기 단축키 수정자(Win32: ALT=1,CTRL=2,SHIFT=4,WIN=8 조합). 기본 ALT.</summary>
+    private int _hideHotkeyMod = 1;
+    public int HideHotkeyMod { get => _hideHotkeyMod; set => Set(ref _hideHotkeyMod, value); }
+
+    /// <summary>숨기기 단축키 가상키 코드. 0이면 키보드 트리거 없음. 기본 ` (VK_OEM_3 = 0xC0).</summary>
+    private int _hideHotkeyVk = 0xC0;
+    public int HideHotkeyVk { get => _hideHotkeyVk; set => Set(ref _hideHotkeyVk, value); }
+
+    /// <summary>숨기기 단축키 마우스 버튼 트리거. 0=없음, 1=좌, 2=우, 3=중앙. (수정자와 조합)</summary>
+    private int _hideHotkeyMouse;
+    public int HideHotkeyMouse { get => _hideHotkeyMouse; set => Set(ref _hideHotkeyMouse, value); }
 
     /// <summary>효과음 사용(Phase 4).</summary>
     private bool _soundEnabled = true;
@@ -216,4 +233,23 @@ public sealed class AppSettings : INotifyPropertyChanged
 
     /// <summary>큐대 당긴 거리(px)당 발사 속도 배율.</summary>
     [JsonIgnore] public double CuePowerScale { get; set; } = 11.0;
+
+    // ── 테마별 커스텀 이미지(덧씌우기) ──────────────────────
+    /// <summary>커스텀 이미지 덧씌우기 사용. 끄면 이미지를 보관한 채 원래 스킨만 보인다.</summary>
+    private bool _skinImageEnabled = true;
+    public bool SkinImageEnabled { get => _skinImageEnabled; set => Set(ref _skinImageEnabled, value); }
+
+    /// <summary>공 지름 대비 커스텀 이미지 크기(1.0 = 공 지름에 꽉 맞춤). 1.0 초과는 원 밖이 잘린다.</summary>
+    private double _skinImageScale = 1.0;
+    public double SkinImageScale { get => _skinImageScale; set => Set(ref _skinImageScale, value); }
+
+    /// <summary>테마별 커스텀 이미지 원본 파일명(표시용). 키 = <see cref="SlimeSkinKind"/> 이름.
+    /// 실제 이미지는 %APPDATA%/Slimey/skins/&lt;스킨&gt;.png 로 복사해 보관한다
+    /// (원본을 옮기거나 지워도 깨지지 않도록). 키가 있으면 그 테마에 커스텀 이미지가 있다는 뜻.
+    /// Dictionary 는 내용 변경이 자동 통보되지 않으므로 <see cref="NotifySkinImagesChanged"/> 를 호출한다.</summary>
+    public Dictionary<string, string> SkinImages { get; set; } = new();
+
+    /// <summary>SkinImages 내용을 바꾼 뒤 호출 — 화면 갱신·자동 저장을 유발한다.</summary>
+    public void NotifySkinImagesChanged()
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(SkinImages)));
 }

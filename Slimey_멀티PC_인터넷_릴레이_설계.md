@@ -354,6 +354,42 @@ PC-A(owner)                 Relay Server                 PC-B
 
 ---
 
+## 18.5 구현 현황 (2026-07-25)
+
+- **서버(7-A/7-B/7-C 핵심) 완료** — `server/slimey-relay/` (Cloudflare Workers + Durable Objects).
+  - `index.ts`(라우팅) · `room.ts`(Room DO: 인증·프레즌스·소유권 중재·핸드오프 라우팅·타임아웃 알람) · `protocol.ts`(메시지 계약).
+  - 검증: `tsc` 0오류, `wrangler deploy --dry-run` OK, **로컬 dev E2E 9/9 PASS**
+    (방 생성·시크릿 인증·BAD_SECRET 거부·NOT_OWNER·핸드오프 라우팅·소유권 이전·TARGET_OFFLINE 폴백·ACK 타임아웃 롤백·소유자 이탈 이양).
+- **클라이언트 연결 계층 완료** — `src/Slimey/Network/`.
+  - `RelayMessages.cs`(DTO, 서버 protocol.ts 와 1:1) · `AuthService.cs`(방 코드/시크릿/노드id, `relay.json` 영속화, WSS URL·HELLO 빌드) · `RelayClient.cs`(WSS 상시 연결·지수 백오프 재연결·하트비트·송수신 이벤트).
+  - 검증: `dotnet build` 0경고/0오류. **아직 App/SlimeWindow 에 미배선**(다음 단계).
+- **물리 통합(7-C/7-D/7-E 핵심) 완료** — `src/Slimey/Network/`.
+  - `HandoffMath.cs`(순수: 엣지 법선/접선, t 정규화·역변환, 교차 감지, pack/unpack) · `NetworkedWalkableArea.cs`(연결된 엣지로는 나가도 유효 → 반사 대신 통과) · `BallHandoffCoordinator.cs`(교차 감지→전송, ACK 결과 처리·롤백 반사, 수신 주입).
+  - `SlimeWindow` 배선: 생성자에서 릴레이 설정 시 `_physics.Area` 를 `NetworkedWalkableArea` 로 교체 + 코디네이터·RelayClient 생성, 렌더 루프에 `CheckAndSendHandoff()`, 소유권에 따른 표시/숨김/유휴(`OnRelayMessage`/`ApplyOwnership`). 릴레이 미설정 시 기존 로컬 동작 그대로.
+  - 검증: `dotnet build` 0/0 · **HandoffMath 단위 17/17 PASS**(직선·90°·flip·이종해상도) · **클라이언트↔서버↔클라이언트 통합 11/11 PASS**(실 RelayClient 2노드가 실서버 거쳐 공 전달, 진입 속도/위치가 JSON 왕복 후 정확히 일치).
+- **설정 UI(7-H) 완료** — 설정창에 **"멀티 PC" 탭** 추가.
+  - `Resources/Theme.xaml`: 다크 입력 스타일 `DarkTextBox`/`DarkPassword`/`DarkCombo`(+`DarkComboItem`) 신규.
+  - `Views/SettingsWindow`: 사용 토글·서버주소·방 코드·시크릿(PasswordBox)·이 PC 이름 + **엣지 매핑 4행**(이 PC의 왼/오/위/아래 → 상대 노드·엣지·거울) + 연결 상태 표시 + "저장 & 적용".
+  - `SlimeWindow`: 런타임 재설정 API(`ApplyRelaySettings`/`PushRoomConfig`/`RelayAuth`/`RelayState`/`RelayStateChanged`) + `SetupNetworking`/`TeardownNetworking`(런타임 on/off). WELCOME 시 서버 링크 없으면 로컬 매핑으로 방 시딩.
+  - `AuthService`: `Links` 영속화(relay.json) 추가.
+  - 검증: `dotnet build` 0/0 · **WPF 렌더 하네스 전체 PASS**(Theme 파싱·다크 콤보 드롭다운·멀티 PC 탭 4행 표시).
+- **실배포 완료** — `wss://slimey-relay.throwme.workers.dev` (Cloudflare Workers + DO, 무료 티어).
+  `/healthz` 200 · WSS 핸드셰이크·인증·방 생성 확인.
+- **링크 병합 버그 수정** — `Network/LinkMerge.cs` 신규.
+  - 증상: A→B 첫 전달만 되고 이후 막힘. 원인: 나중에 접속한 노드가 **서버 링크를 그대로 채택하며 자기 매핑을 버려** 나갈 엣지가 0이 됨(→ 벽 반사).
+  - 규칙: **자기 노드에서 나가는 링크는 그 PC 가 권위**, 다른 노드 링크는 서버 것 보존. 병합 결과가 서버와 다르면 `ROOM_CONFIG` 재배포.
+  - 검증(배포 서버 경유): A/B 각자 자기 링크만 갖고 접속 → 양쪽 출구 확보 → **A→B→A 왕복 + 반복 PASS**.
+- **한 PC 다중 인스턴스 테스트 지원** — `--profile=<이름>` 으로 설정 파일 분리(`relay.<p>.json`/`settings.<p>.json`),
+  `--server/--room/--secret/--node/--link` 실행 인자 오버라이드(`AuthService`), 실행 스크립트 `tools/test-two-nodes.ps1`.
+  - **주의(설정 지침)**: 좌·우 **양쪽 모두** 상대에게 매핑해야 어느 방향으로든 넘어간다.
+    한쪽만 연결하면 공을 받은 노드는 반대 방향만 열려 "번갈아" 동작한다(연결 없는 엣지는 설계대로 반사).
+- **다음 단계(미구현)**:
+  1. 실제 2대 PC 실측(인터넷 지연·진입 보정 체감).
+  2. 보안 강화(7-G): 메시지 HMAC 서명(`sig`).
+  3. (선택) 프레즌스 기반 상대 PC 드롭다운(현재는 이름 직접 입력).
+
+---
+
 ## 19. 결론
 
 - **가능하며, 기존 저침습 설계와 잘 맞는다.** 물리 엔진·좌표 정규화·토큰·핸드오프 메시지는 **그대로 재사용**하고, **연결 계층만 릴레이 서버(WSS)로 교체**한다.

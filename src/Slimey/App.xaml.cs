@@ -1,7 +1,9 @@
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using Application = System.Windows.Application;
 using Slimey.Models;
+using Slimey.Network;
 using Slimey.Services;
 using Slimey.Views;
 
@@ -29,6 +31,19 @@ public partial class App : Application
         }
 
         RegisterGlobalExceptionHandlers();
+
+        // --profile=<이름> : 설정 파일을 분리해 한 PC에서 여러 인스턴스를 서로 다른 노드로 띄운다(테스트용).
+        // 반드시 설정을 읽기 전에 적용해야 한다.
+        string? profile = e.Args
+            .FirstOrDefault(a => a.StartsWith("--profile=", StringComparison.OrdinalIgnoreCase))
+            ?.Split('=', 2)[1].Trim();
+        if (!string.IsNullOrWhiteSpace(profile))
+        {
+            SettingsStore.Profile = profile;
+            AuthService.Profile = profile;
+            Logger.Info($"Using settings profile '{profile}'.");
+        }
+
         Logger.Info("Slimey starting.");
 
         // 이전 실행에서 받아 둔 업데이트가 있으면, 창을 만들기 전에 교체·재시작하고 즉시 종료.
