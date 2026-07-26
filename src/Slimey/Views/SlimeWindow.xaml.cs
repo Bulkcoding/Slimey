@@ -225,6 +225,7 @@ public partial class SlimeWindow : Window
         _physics.SurfaceSpin = 0;
         _dragSpin = 0;
         _physics.SetPositionClamped(cursor - new Vector2(half, half));
+        if (BowlingOn) { _ballGutterSide = 0; ClampBallForPlacement(); }
         _animation.OnImpact(_settings.MaxSpeed * 0.25); // 잡히는 작은 반응
         ApplyWindowPosition();
         EnsureRendering();
@@ -527,6 +528,7 @@ public partial class SlimeWindow : Window
         }
 
         _physics.SetPositionClamped(cursor - _dragOffset);
+        if (BowlingOn) ClampBallForPlacement(); // 볼링: 레인 위·파울선 위로만 놓을 수 있다
         _tracker.AddSample(cursor, now);
         ApplyWindowPosition();
     }
@@ -544,6 +546,8 @@ public partial class SlimeWindow : Window
                 CloseBallIfOpen(); // 던지면 열린 볼은 닫힘
                 if (_settings.ThrowMode)
                     _physics.Velocity = _tracker.ComputeThrowVelocity(Now);
+                // 볼링: 기름칠 레인 보정(최소 속도 + 항상 전진)
+                if (BowlingOn && !_gameOver) ApplyBowlingLaunch();
                 break;
 
             case ReleaseAction.CatchHold:
@@ -579,6 +583,7 @@ public partial class SlimeWindow : Window
     // ── 렌더 루프 ───────────────────────────────────────────
     private void EnsureRendering()
     {
+        if (BowlingOn) StartBowlingLoop(); // 볼링 중이면 핀 물리 루프도 함께 깨운다
         if (_renderingActive) return;
         _renderingActive = true;
         _lastFrameTime = Now;
@@ -634,8 +639,10 @@ public partial class SlimeWindow : Window
                 _dizzyUntil = now + DizzyDurationSeconds;
         }
 
+        if (BowlingOn) UpdateBallLane(_settings.SlimeSize * 0.42); // 볼링: 파울선·거터 규칙
         ApplyWindowPosition();
         _animation.Tick(dt, _physics.Velocity, _physics.SpinAngle);
+        UpdateSkinRoll(dt);
         UpdateSpinFx();
 
         // 표정: 어질(충돌 직후) > 신남(빠름) > 평상
@@ -737,6 +744,7 @@ public partial class SlimeWindow : Window
                 break;
             case nameof(AppSettings.Skin):
                 ClearExtraBalls(); // 테마(스킨) 바꾸면 놓았던 3/4구 당구공도 함께 치운다
+                ExitBowling();     // 볼링 모드도 정리
                 ApplySkin();
                 break;
             case nameof(AppSettings.CueStickMode):
@@ -767,11 +775,25 @@ public partial class SlimeWindow : Window
                 : new BilliardSkin(),
             SlimeSkinKind.Pokeball or SlimeSkinKind.Ultra or SlimeSkinKind.Master
                 => new BallSkin(_settings.Skin),
+            SlimeSkinKind.Bowling => new BowlingSkin(),
             _ => new JellySkin(),
         };
         _expression = SlimeExpression.Normal; // 새 스킨은 기본 표정으로 시작
         UpdateSkinBehavior();
         UpdateSpinAimVisibility();
+    }
+
+    /// <summary>굴러가며 무늬가 바뀌는 스킨(볼링공)에 이번 프레임 회전수를 전달.</summary>
+    private void UpdateSkinRoll(double dt)
+    {
+        if (SkinHost.Content is not ISkinRolling rolling) return;
+        double size = _settings.SlimeSize;
+        if (size <= 0) return;
+        double dist = _physics.Velocity.Length * dt;
+        if (dist <= 0) return;
+        double revs = dist / (Math.PI * size);          // 이동거리 → 공 지름 기준 회전수
+        if (_physics.Velocity.X < 0) revs = -revs;        // 왼쪽으로 굴러가면 반대로 넘김
+        rolling.OnRoll(revs);
     }
 
     /// <summary>표정 변경(스킨이 표정을 지원할 때만). 상태가 바뀔 때만 반영.</summary>
@@ -823,6 +845,13 @@ public partial class SlimeWindow : Window
         Menu4Ball.Visibility = vis;
         Menu3Ball.Visibility = vis;
         MenuClearBalls.Visibility = _extraBalls.Count > 0 && bil ? Visibility.Visible : Visibility.Collapsed;
+
+        // 볼링공 테마일 때만 볼링 메뉴 노출
+        bool bowl = _settings.Skin == SlimeSkinKind.Bowling;
+        MenuBowlingSep.Visibility = bowl ? Visibility.Visible : Visibility.Collapsed;
+        MenuBowlingStart.Visibility = bowl && !BowlingOn ? Visibility.Visible : Visibility.Collapsed;
+        MenuBowlingReset.Visibility = bowl && BowlingOn ? Visibility.Visible : Visibility.Collapsed;
+        MenuBowlingExit.Visibility = bowl && BowlingOn ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void On4Ball(object sender, RoutedEventArgs e) => SpawnBalls(2, 1);
@@ -942,6 +971,609 @@ public partial class SlimeWindow : Window
         if (cueChanged) EnsureRendering(); // 수구가 맞았으면 수구 루프 깨우기
     }
 
+    // ── 볼링 모드 (레인 + 10핀) ─────────────────────────────
+    private readonly List<PinWindow> _pins = new();
+    private LaneOverlayWindow? _lane;
+    private bool _bowlingActive;        // 볼링 물리 루프 가동 중
+    private double _bowlingLastTime;
+    private BowlingLayout _bl;          // 현재 레인 지오메트리(가둠 판정에 사용)
+    private int _ballGutterSide;        // 0=레인 위, -1=왼쪽 거터, +1=오른쪽 거터
+    private Vector2 _ballPrevPos;       // 직전 프레임 공 위치(터널링 방지 서브스텝용)
+    private bool _ballPrevInit;
+    private double? _savedSlimeSize;    // 볼링 진입 전 사용자 크기(종료 시 복원)
+    private double? _savedFriction;     // 볼링 진입 전 마찰(기름칠 레인 복원용)
+    private const double BowlingSize = 96.0;   // 볼링은 항상 기본 크기로 진행
+    // 기름칠 레인: 기본(0.9)보다 훨씬 덜 감속해 매끄럽게 굴러간다.
+    // 단, 던진 세기는 그대로 반영되므로 살살 굴리면 끝까지 못 간다.
+    private const double OiledFriction = 0.35;
+    private bool _bowlingOn;
+    private bool BowlingOn => _bowlingOn;
+
+    // ── 게임 진행(10프레임 × 2구) ───────────────────────────
+    private const int TotalFrames = 10;
+    private int _frame = 1;             // 1..10
+    private int _throwNo = 1;           // 1 또는 2
+    private int _totalScore;
+    private bool _gameOver;
+    private bool _ballLaunched;         // 이번 투구가 던져졌는가
+    private bool _ballReachedEnd;       // 공이 레인 끝(핀 뒤 벽)에 닿았는가
+    private double _finishThrowAt;      // >0 이면 이 시각에 투구 마무리 처리
+    private string? _banner;            // STRIKE!/거터! 등 임시 배너
+    private double _bannerUntil;
+
+    private void OnBowlingStart(object sender, RoutedEventArgs e)
+    {
+        if (_settings.Skin != SlimeSkinKind.Bowling) return;
+        SetupBowling();
+    }
+
+    /// <summary>핀 다시 세우기 = 게임을 1프레임부터 새로 시작.</summary>
+    private void OnBowlingReset(object sender, RoutedEventArgs e)
+    {
+        if (!BowlingOn) return;
+        _bl = ComputeBowlingLayout();
+        StartNewGame();
+    }
+
+    private void StartNewGame()
+    {
+        _frame = 1;
+        _throwNo = 1;
+        _totalScore = 0;
+        _gameOver = false;
+        _banner = null;
+        RespawnPins(_bl);
+        ResetBallToStart();
+        UpdateHud();
+    }
+
+    private void OnBowlingExit(object sender, RoutedEventArgs e) => ExitBowling();
+
+    private void SetupBowling()
+    {
+        ExitBowling(); // 중복 방지
+
+        // 볼링은 항상 기본 크기(default)로. 사용자 크기를 기억했다가 종료 시 복원.
+        _savedSlimeSize = _settings.SlimeSize;
+        if (Math.Abs(_settings.SlimeSize - BowlingSize) > 0.5)
+            _settings.SlimeSize = BowlingSize; // PropertyChanged → 창/물리 즉시 재적용
+
+        // 기름칠 레인: 마찰을 낮춰 매끄럽게 굴러가게 한다(세기 보정은 하지 않는다).
+        _savedFriction = _settings.Friction;
+        _settings.Friction = OiledFriction;
+
+        // 던지기 가중치는 볼링 동안 1.0x 로 취급한다. 단 설정값 자체는 바꾸지 않는다
+        // (자동저장이 사용자 값을 덮어쓰지 않도록) — 발사 시점에 나눠서 상쇄한다.
+
+        _bowlingOn = true;
+        _bl = ComputeBowlingLayout();
+
+        _lane = new LaneOverlayWindow(_monitors);
+        _lane.Show(); // Show() 시점에 창 위치/배율 확정
+        _lane.Setup(_bl.CenterX, _bl.TopY, _bl.BotY, _bl.FoulY,
+                    _bl.LaneHalfTop, _bl.LaneHalfBot, _bl.AlleyHalfTop, _bl.AlleyHalfBot,
+                    _bl.DeckBotY, _bl.ArrowsY);
+
+        StartNewGame();        // 핀 세우기 + 공 시작점 + HUD
+        RaiseMainWindowTop();  // 공 창을 최상단으로(레인·핀 위)
+        StartBowlingLoop();
+    }
+
+    private void RespawnPins(BowlingLayout layout)
+    {
+        ClearPins();
+        foreach (var c in layout.PinCenters)
+        {
+            var pin = new PinWindow(_settings, _monitors, c);
+            _pins.Add(pin);
+            pin.Show();
+        }
+    }
+
+    private void ClearPins()
+    {
+        foreach (var p in _pins) { try { p.Close(); } catch { } }
+        _pins.Clear();
+    }
+
+    /// <summary>볼링 모드 종료: 루프 정지 + 핀·레인 정리 + 공 Topmost·크기·마찰 복원.</summary>
+    private void ExitBowling()
+    {
+        _bowlingOn = false;
+        StopBowlingLoop();
+        ClearPins();
+        if (_lane != null) { try { _lane.Close(); } catch { } _lane = null; }
+        Topmost = _settings.AlwaysOnTop;
+        if (_savedSlimeSize.HasValue)
+        {
+            _settings.SlimeSize = _savedSlimeSize.Value; // 사용자 크기 복원
+            _savedSlimeSize = null;
+        }
+        if (_savedFriction.HasValue)
+        {
+            _settings.Friction = _savedFriction.Value;   // 마찰 복원
+            _savedFriction = null;
+        }
+    }
+
+    private void MoveBallTo(Vector2 center)
+    {
+        double half = _settings.SlimeSize / 2.0;
+        _physics.Velocity = Vector2.Zero;
+        _physics.AngularVelocity = 0;
+        _physics.SurfaceSpin = 0;
+        _ballGutterSide = 0;          // 새 투구: 거터 상태 해제
+        _physics.SetPositionClamped(center - new Vector2(half, half));
+        _ballPrevPos = _physics.Position;
+        _ballPrevInit = true;
+        ApplyWindowPosition();
+        EnsureRendering();
+    }
+
+    /// <summary>공 창을 최상단으로 끌어올린다(나중에 뜬 레인/핀 위로).</summary>
+    private void RaiseMainWindowTop()
+    {
+        Topmost = false;
+        Topmost = true;
+    }
+
+    // ── 투구 진행 ───────────────────────────────────────────
+    /// <summary>공을 시작점(파울선)에 다시 놓고 다음 투구를 준비.</summary>
+    private void ResetBallToStart()
+    {
+        _ballLaunched = false;
+        _ballReachedEnd = false;
+        _finishThrowAt = 0;
+        MoveBallTo(_bl.BallStart);
+    }
+
+    /// <summary>
+    /// 볼링 투구 시작 표시. 던진 세기는 사용자의 손놀림 그대로 두고(보정 없음),
+    /// 터널링 방지를 위한 상한만 건다. 레인이 기름칠돼 있어 굴러가는 느낌만 매끄럽다.
+    /// </summary>
+    private void ApplyBowlingLaunch()
+    {
+        // 사용자의 "던지기 가중치"를 상쇄해 볼링에서는 항상 1.0x(실제 손놀림 그대로)로 던진다.
+        double tp = _settings.ThrowPower;
+        if (tp > 0.01 && Math.Abs(tp - 1.0) > 0.01) _physics.Velocity /= tp;
+
+        double maxSpeed = _settings.SlimeSize * 45.0;
+        if (_physics.Velocity.Length > maxSpeed)
+            _physics.Velocity = _physics.Velocity.ClampLength(maxSpeed);
+
+        _ballLaunched = true;
+        _ballReachedEnd = false;
+        _finishThrowAt = 0;
+    }
+
+    private int CountKnockedPins()
+    {
+        int n = 0;
+        foreach (var p in _pins) if (p.Knocked) n++;
+        return n;
+    }
+
+    /// <summary>쓰러진 핀을 치운다(남은 핀은 그 자리에 그대로).</summary>
+    private void RemoveKnockedPins()
+    {
+        for (int i = _pins.Count - 1; i >= 0; i--)
+        {
+            if (!_pins[i].Knocked) continue;
+            try { _pins[i].Close(); } catch { }
+            _pins.RemoveAt(i);
+        }
+    }
+
+    /// <summary>공이 끝까지 굴러가 멈춘 뒤 호출 — 점수 집계 + 다음 투구/프레임 준비.</summary>
+    private void FinishThrow()
+    {
+        int knocked = CountKnockedPins();
+        _totalScore += knocked;
+
+        if (_throwNo == 1)
+        {
+            if (knocked >= 10)
+            {
+                ShowBanner("STRIKE! 🎳", Color.FromRgb(0xFF, 0xD1, 0x3A));
+                NextFrame();
+            }
+            else
+            {
+                if (knocked == 0 && _ballGutterSide != 0)
+                    ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
+                RemoveKnockedPins();   // 쓰러진 핀만 치우고 남은 핀은 그대로
+                _throwNo = 2;
+                ResetBallToStart();
+            }
+        }
+        else
+        {
+            // 2구: 남아 있던 핀을 모두 쓰러뜨렸으면 스페어
+            if (knocked > 0 && knocked == _pins.Count)
+                ShowBanner("SPARE! ✨", Color.FromRgb(0x9B, 0xE8, 0x7A));
+            else if (knocked == 0 && _ballGutterSide != 0)
+                ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
+            NextFrame();
+        }
+
+        UpdateHud();
+    }
+
+    private void NextFrame()
+    {
+        _frame++;
+        _throwNo = 1;
+        if (_frame > TotalFrames)
+        {
+            _frame = TotalFrames;
+            _gameOver = true;
+            ClearPins();
+            ResetBallToStart();
+            return;
+        }
+        RespawnPins(_bl);      // 새 프레임: 10핀 전부 다시
+        ResetBallToStart();
+    }
+
+    private void ShowBanner(string text, Color color)
+    {
+        _banner = text;
+        _bannerColor = color;
+        _bannerUntil = Now + 1.8;
+    }
+
+    private Color _bannerColor = Colors.White;
+
+    private void UpdateHud()
+    {
+        if (_lane == null) return;
+        if (_gameOver)
+        {
+            _lane.SetStatus($"게임 종료! 총 {_totalScore}점 · 우클릭 → 핀 다시 세우기",
+                Color.FromRgb(0xFF, 0xD1, 0x3A));
+            return;
+        }
+        if (_banner != null && Now < _bannerUntil)
+        {
+            _lane.SetStatus(_banner, _bannerColor);
+            return;
+        }
+        _banner = null;
+        _lane.SetStatus($"{_frame}F · {_throwNo}구 · {_totalScore}점",
+            Color.FromRgb(0xFF, 0xF4, 0xD6));
+    }
+
+    private readonly struct BowlingLayout
+    {
+        public double CenterX { get; init; }
+        public double TopY { get; init; }      // 핀 뒤 벽(원경, 좁음)
+        public double BotY { get; init; }      // 레인 시각 하단(근경, 넓음)
+        public double FoulY { get; init; }     // 파울 라인(공이 넘지 못하는 하한)
+        public double LaneHalfTop { get; init; }
+        public double LaneHalfBot { get; init; }
+        public double AlleyHalfTop { get; init; }
+        public double AlleyHalfBot { get; init; }
+        public double DeckBotY { get; init; }
+        public double ArrowsY { get; init; }
+        public Vector2 BallStart { get; init; }
+        public List<Vector2> PinCenters { get; init; }
+    }
+
+    /// <summary>주 모니터 작업영역 기준 원근 레인·핀·공 위치 계산(모두 물리 px).</summary>
+    private BowlingLayout ComputeBowlingLayout()
+    {
+        System.Windows.Rect wa = _monitors.PrimaryWorkingArea;
+        double S = _settings.SlimeSize;
+
+        double cx = wa.Left + wa.Width / 2.0;
+        double topY = wa.Top + wa.Height * 0.045;          // 원경(핀 뒤)
+        double botY = wa.Bottom - wa.Height * 0.04;        // 근경(투구석 하단)
+        double foulY = wa.Bottom - wa.Height * 0.15;       // 파울 라인(공 하한)
+
+        // 레인 반폭: 위(좁음) → 아래(넓음)로 원근. 화면을 넘지 않게 상한.
+        double laneHalfBot = Math.Min(wa.Width * 0.30, S * 2.2);
+        double laneHalfTop = laneHalfBot * 0.64;
+        // 거터 폭 = 공 지름(공이 쏙 들어가 굴러갈 수 있게). 원근에 맞춰 위쪽은 좁게.
+        double gutterBot = S * 1.05;
+        double gutterTop = gutterBot * (laneHalfTop / laneHalfBot);
+        double alleyHalfTop = laneHalfTop + gutterTop;
+        double alleyHalfBot = laneHalfBot + gutterBot;
+
+        // 표준 10핀 삼각(뒤=위 4핀 … 헤드핀=아래 1핀). 촘촘히 놓아 연쇄가 잘 일어나게.
+        double hGap = S * 0.72;
+        double vGap = S * 0.62;
+        double backY = topY + S * 0.95;   // 뒤 열(4핀) 중심 y
+        var pins = new List<Vector2>();
+        int[] counts = { 4, 3, 2, 1 };
+        for (int row = 0; row < counts.Length; row++)
+        {
+            int k = counts[row];
+            double y = backY + row * vGap;
+            for (int i = 0; i < k; i++)
+            {
+                double x = cx + (i - (k - 1) / 2.0) * hGap;
+                pins.Add(new Vector2(x, y));
+            }
+        }
+        double headY = backY + (counts.Length - 1) * vGap;
+        double deckBotY = headY + S * 0.5;
+        double arrowsY = headY + (foulY - headY) * 0.42;
+        var ballStart = new Vector2(cx, foulY + S * 0.58); // 파울선 뒤(투구 준비 구역)에 놓는다
+
+        return new BowlingLayout
+        {
+            CenterX = cx, TopY = topY, BotY = botY, FoulY = foulY,
+            LaneHalfTop = laneHalfTop, LaneHalfBot = laneHalfBot,
+            AlleyHalfTop = alleyHalfTop, AlleyHalfBot = alleyHalfBot,
+            DeckBotY = deckBotY, ArrowsY = arrowsY,
+            BallStart = ballStart, PinCenters = pins,
+        };
+    }
+
+    /// <summary>원근 선형 보간(위 top → 아래 bot).</summary>
+    private double LerpAt(double top, double bot, double y)
+    {
+        double denom = _bl.BotY - _bl.TopY;
+        double t = denom <= 0 ? 0 : (y - _bl.TopY) / denom;
+        return top + (bot - top) * Math.Clamp(t, 0, 1);
+    }
+
+    /// <summary>y 에서 레인(나무 바닥)의 반폭.</summary>
+    private double LaneHalfAt(double y) => LerpAt(_bl.LaneHalfTop, _bl.LaneHalfBot, y);
+
+    /// <summary>y 에서 알리(레인+거터)의 반폭.</summary>
+    private double AlleyHalfAt(double y) => LerpAt(_bl.AlleyHalfTop, _bl.AlleyHalfBot, y);
+
+    /// <summary>y 에서 거터 홈 중심선의 x. side: -1 왼쪽 / +1 오른쪽.</summary>
+    private double GutterCenterAt(double y, int side)
+        => _bl.CenterX + side * (LaneHalfAt(y) + AlleyHalfAt(y)) / 2.0;
+
+    /// <summary>핀을 레인(나무 바닥) 안 + 파울 라인 위로 가둔다. 벽에 부딪히면 감쇠 반사.</summary>
+    private void ConfineToLane(SlimePhysicsEngine eng, double r)
+    {
+        const double wallE = 0.4;
+        double half = _settings.SlimeSize / 2.0;
+        Vector2 c = eng.Position + new Vector2(half, half);
+        double cx = c.X, cy = c.Y;
+        bool hit = false;
+
+        double topLim = _bl.TopY + r, botLim = _bl.FoulY - r;
+        if (cy < topLim) { cy = topLim; if (eng.Velocity.Y < 0) eng.Velocity = eng.Velocity.WithY(-eng.Velocity.Y * wallE); hit = true; }
+        else if (cy > botLim) { cy = botLim; if (eng.Velocity.Y > 0) eng.Velocity = eng.Velocity.WithY(-eng.Velocity.Y * wallE); hit = true; }
+
+        double lh = Math.Max(r, LaneHalfAt(cy) - r);
+        double leftLim = _bl.CenterX - lh, rightLim = _bl.CenterX + lh;
+        if (cx < leftLim) { cx = leftLim; if (eng.Velocity.X < 0) eng.Velocity = eng.Velocity.WithX(-eng.Velocity.X * wallE); hit = true; }
+        else if (cx > rightLim) { cx = rightLim; if (eng.Velocity.X > 0) eng.Velocity = eng.Velocity.WithX(-eng.Velocity.X * wallE); hit = true; }
+
+        if (hit) eng.Position = new Vector2(cx - half, cy - half);
+    }
+
+    /// <summary>공 전용: 파울선·뒷벽 가둠 + 거터 진입/주행 처리.</summary>
+    private void UpdateBallLane(double rBall)
+    {
+        double half = _settings.SlimeSize / 2.0;
+        Vector2 c = _physics.Position + new Vector2(half, half);
+        double bx = c.X, by = c.Y;
+
+        // ── 세로: 파울선 뒤(투구 준비 구역)까지 자유롭게 오갈 수 있고, 핀 뒤 벽만 넘지 못한다 ──
+        double topLim = _bl.TopY + rBall, botLim = _bl.BotY - rBall;
+        if (by < topLim)
+        {
+            by = topLim;
+            _ballReachedEnd = true;      // 레인 끝 도달 → 이번 투구 종료 트리거
+            // 끝에 닿으면 되돌아오지 않고 그대로 멈춘다.
+            if (_physics.Velocity.Y < 0) _physics.Velocity = _physics.Velocity.WithY(0);
+        }
+        else if (by > botLim)
+        {
+            by = botLim;
+            if (_physics.Velocity.Y > 0) _physics.Velocity = _physics.Velocity.WithY(0);
+        }
+
+        // ── 가로: 레인 가장자리를 넘으면 거터로 떨어진다(한 번 빠지면 복귀 불가) ──
+        // 거터는 파울선 너머(레인 위)에만 있다. 준비 구역에서는 빠지지 않는다.
+        if (_ballGutterSide == 0 && by < _bl.FoulY && Math.Abs(bx - _bl.CenterX) > LaneHalfAt(by))
+        {
+            _ballGutterSide = bx < _bl.CenterX ? -1 : +1;
+            _audio.Play(ImpactTier.Bonk, 0.35);   // 거터에 툭 떨어지는 소리
+        }
+
+        if (_ballGutterSide != 0)
+        {
+            // 거터 주행: 좌우로는 못 움직이고 홈을 따라 앞으로만 굴러간다.
+            bx = GutterCenterAt(by, _ballGutterSide);
+            _physics.Velocity = _physics.Velocity.WithX(0);
+            _physics.AngularVelocity = 0;
+        }
+        else
+        {
+            // 레인 위: 알리(레인+거터) 밖으로는 절대 못 나간다(안전망)
+            double ah = Math.Max(rBall, AlleyHalfAt(by) - rBall);
+            bx = Math.Clamp(bx, _bl.CenterX - ah, _bl.CenterX + ah);
+        }
+
+        _physics.Position = new Vector2(bx - half, by - half);
+    }
+
+    /// <summary>드래그/잡기로 공을 옮길 때: 레인 위 + 파울선 위로만 놓을 수 있게 클램프.</summary>
+    private void ClampBallForPlacement()
+    {
+        double half = _settings.SlimeSize / 2.0;
+        double r = _settings.SlimeSize * 0.42;
+        Vector2 c = _physics.Position + new Vector2(half, half);
+        double by = Math.Clamp(c.Y, _bl.TopY + r, _bl.BotY - r);
+        double lh = Math.Max(r, LaneHalfAt(by) - r);
+        double bx = Math.Clamp(c.X, _bl.CenterX - lh, _bl.CenterX + lh);
+        _physics.Position = new Vector2(bx - half, by - half);
+    }
+
+    // ── 볼링 물리 루프(공-핀·핀-핀 충돌; 공이 무거워 핀이 튕겨나간다) ──
+    private void StartBowlingLoop()
+    {
+        if (_bowlingActive || _pins.Count == 0) return;
+        _bowlingActive = true;
+        _bowlingLastTime = Now;
+        CompositionTarget.Rendering += OnBowlingTick;
+    }
+
+    private void StopBowlingLoop()
+    {
+        if (!_bowlingActive) return;
+        _bowlingActive = false;
+        CompositionTarget.Rendering -= OnBowlingTick;
+    }
+
+    private void OnBowlingTick(object? sender, EventArgs e)
+    {
+        double now = Now;
+        double dt = now - _bowlingLastTime;
+        _bowlingLastTime = now;
+        if (dt <= 0) return;
+        if (dt > _settings.MaxFrameDeltaSeconds) dt = _settings.MaxFrameDeltaSeconds;
+
+        double rBall = _settings.SlimeSize * 0.42;
+        double rPin = PinRadius;
+
+        foreach (var p in _pins)
+        {
+            p.Physics.Update(dt);
+            // 레인은 기름칠(저마찰)이라 핀에는 별도 감쇠를 줘 금방 자리를 잡게 한다.
+            p.Physics.Velocity *= Math.Exp(-3.0 * dt);
+            ConfineToLane(p.Physics, rPin);
+        }
+
+        // 공이 한 프레임에 많이 움직이면 핀을 뚫고 지나갈 수 있다(터널링).
+        // 지난 프레임 위치에서 현재 위치까지 잘게 나눠 충돌을 검사한다.
+        Vector2 curBall = _physics.Position;
+        double travel = (curBall - _ballPrevPos).Length;
+        double maxStep = (rBall + rPin) * 0.5;
+        int steps = _ballPrevInit && travel > maxStep
+            ? Math.Min(16, (int)Math.Ceiling(travel / maxStep))
+            : 1;
+        for (int s = 1; s <= steps; s++)
+        {
+            if (steps > 1)
+                _physics.Position = _ballPrevPos + (curBall - _ballPrevPos) * (s / (double)steps);
+            ResolveBowlingCollisions(rBall, rPin);
+        }
+        _ballPrevPos = _physics.Position;
+        _ballPrevInit = true;
+
+        foreach (var p in _pins) p.ApplyPosition();
+
+        // 공: 파울선·뒷벽 가둠 + 거터 주행(충돌로 밀린 뒤에도 다시 적용)
+        UpdateBallLane(rBall);
+        ApplyWindowPosition();
+
+        UpdateHud();
+
+        bool ballMoving = !_physics.IsAtRest;
+        bool pinsMoving = false;
+        foreach (var p in _pins) if (!p.Physics.IsAtRest) { pinsMoving = true; break; }
+
+        // 투구 종료 판정: 던져진 공이 레인 끝에 닿았거나 멈췄고, 핀도 다 정리되면
+        // 잠깐 여운을 준 뒤 점수 집계 → 다음 투구/프레임 준비(공은 시작점으로).
+        if (_ballLaunched && !_gameOver && _finishThrowAt <= 0
+            && (_ballReachedEnd || !ballMoving) && !pinsMoving)
+        {
+            _finishThrowAt = now + 0.8;
+        }
+        if (_finishThrowAt > 0 && now >= _finishThrowAt)
+        {
+            _finishThrowAt = 0;
+            FinishThrow();
+            return; // 이번 프레임은 여기서 마무리(위치는 FinishThrow 가 정리)
+        }
+
+        // 공·핀 모두 멈추고 대기 중인 처리도 없으면 루프 정지(유휴 CPU 0)
+        bool pending = _finishThrowAt > 0 || (_banner != null && now < _bannerUntil);
+        if (!ballMoving && !pinsMoving && !pending) StopBowlingLoop();
+    }
+
+    /// <summary>핀 충돌 반경 — PinSkin 의 실제 최대폭에서 유도.</summary>
+    private double PinRadius =>
+        _settings.SlimeSize * PinWindow.BoxFactor * (Skins.PinSkin.PinMaxWidth / Skins.PinSkin.Box) / 2.0;
+
+    /// <summary>공(무거움)+핀(가벼움) 원-원 충돌. 핀은 맞으면 넘어지고 다른 핀도 쓰러뜨린다(연쇄).</summary>
+    private void ResolveBowlingCollisions(double rBall, double rPin)
+    {
+        double half = _settings.SlimeSize / 2.0;
+        var halfV = new Vector2(half, half);
+        const double ballMass = 3.0, pinMass = 1.0;
+        const double knockSpeed = 70.0;
+        double maxPinSpeed = _settings.SlimeSize * 13.0; // 핀 튕김 속도 상한(과도한 비산 방지)
+
+        int n = _pins.Count + 1; // 0 = 공, 1.. = 핀
+        var eng = new SlimePhysicsEngine[n];
+        var rad = new double[n];
+        var invM = new double[n];
+        eng[0] = _physics; rad[0] = rBall; invM[0] = 1.0 / ballMass;
+        for (int i = 0; i < _pins.Count; i++)
+        {
+            eng[i + 1] = _pins[i].Physics; rad[i + 1] = rPin; invM[i + 1] = 1.0 / pinMass;
+        }
+
+        bool ballChanged = false;
+        int newlyKnocked = 0;
+
+        // 거터에 빠진 공은 핀에 닿지 않는다(거터볼 = 0점)
+        int first = _ballGutterSide != 0 ? 1 : 0;
+
+        for (int i = first; i < n; i++)
+        for (int j = i + 1; j < n; j++)
+        {
+            var a = eng[i]; var b = eng[j];
+            Vector2 ca = a.Position + halfV, cb = b.Position + halfV;
+            Vector2 d = cb - ca;
+            double dist = d.Length;
+            double minDist = rad[i] + rad[j];
+            if (dist <= 1e-4 || dist >= minDist) continue;
+
+            Vector2 no = d / dist;
+            double overlap = minDist - dist;
+            double invSum = invM[i] + invM[j];
+            // 질량 반비례로 겹침 분리
+            a.Position -= no * (overlap * (invM[i] / invSum));
+            b.Position += no * (overlap * (invM[j] / invSum));
+            a.SetPositionClamped(a.Position);
+            b.SetPositionClamped(b.Position);
+
+            Vector2 rv = b.Velocity - a.Velocity;
+            double vn = rv.X * no.X + rv.Y * no.Y;
+            if (vn < 0)
+            {
+                const double e = 0.42; // 핀은 통 튕기지 않고 툭
+                double jimp = -(1 + e) * vn / invSum;
+                a.Velocity -= no * (jimp * invM[i]);
+                b.Velocity += no * (jimp * invM[j]);
+
+                // 핀 속도 상한(공은 제외 — 공은 뚫고 지나가야 한다)
+                if (i != 0) a.Velocity = a.Velocity.ClampLength(maxPinSpeed);
+                if (j != 0) b.Velocity = b.Velocity.ClampLength(maxPinSpeed);
+
+                if (i == 0) ballChanged = true;
+                if (KnockIfPin(i, eng[i], knockSpeed)) newlyKnocked++;
+                if (KnockIfPin(j, eng[j], knockSpeed)) newlyKnocked++;
+            }
+        }
+
+        if (newlyKnocked > 0) _audio.Play(ImpactTier.Bonk, 0.55);
+        if (ballChanged) EnsureRendering();
+    }
+
+    /// <summary>인덱스가 핀이고 충분히 빠르면 넘어뜨린다. 새로 넘어졌으면 true.</summary>
+    private bool KnockIfPin(int idx, SlimePhysicsEngine engine, double knockSpeed)
+    {
+        if (idx == 0) return false; // 공은 넘어지지 않음
+        var pin = _pins[idx - 1];
+        if (pin.Knocked) return false;
+        if (engine.Velocity.Length < knockSpeed) return false;
+        int dir = engine.Velocity.X >= 0 ? 1 : -1;
+        pin.Knock(dir);
+        return true;
+    }
+
     // ── 정리 ────────────────────────────────────────────────
     public void ShutdownCleanup()
     {
@@ -956,6 +1588,7 @@ public partial class SlimeWindow : Window
         MouseLeftButtonUp -= OnMouseLeftButtonUp;
 
         ClearExtraBalls();
+        ExitBowling();
         try { _aimOverlay?.Close(); } catch { }
         _aimOverlay = null;
         _overlay?.ShutdownCleanup();

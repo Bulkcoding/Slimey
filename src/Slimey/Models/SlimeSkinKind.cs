@@ -17,4 +17,7 @@ public enum SlimeSkinKind
 
     /// <summary>마스터볼 — 보라+분홍 M.</summary>
     Master = 4,
+
+    /// <summary>볼링공 — 파란 마블. 굴러가며 9가지 무늬(손가락 구멍 배치)가 바뀐다.</summary>
+    Bowling = 6,
 }
