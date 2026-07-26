@@ -54,6 +54,26 @@ public sealed class SlimePhysicsEngine
     /// <summary>누적 회전각(deg). 시각 회전에 사용.</summary>
     public double SpinAngle { get; set; }
 
+    /// <summary>중력 가속도(px/s^2, 아래 +y). 0이면 무중력(기본). 농구공에서만 설정한다.</summary>
+    public double GravityY { get; set; } = 0.0;
+
+    /// <summary>반발 계수 오버라이드(설정 대신 사용). null이면 설정값. 골대 ON 시 현실값 고정용.</summary>
+    public double? RestitutionOverride { get; set; }
+    /// <summary>마찰(공기저항) 오버라이드(설정 대신 사용). null이면 설정값. 골대 ON 시 현실값 고정용.</summary>
+    public double? FrictionOverride { get; set; }
+
+    private double EffRestitution => RestitutionOverride ?? _settings.Restitution;
+    private double EffFriction => FrictionOverride ?? _settings.Friction;
+
+    /// <summary>현재 적용 중인 마찰(1/s). 조준 유도선이 실제 궤적과 같게 그리도록 노출.</summary>
+    public double EffectiveFriction => EffFriction;
+
+    /// <summary>바닥에 붙어 이 속도(px/s) 미만으로 튀면 수직 속도를 죽여 무한 미세 바운스를 막는다.</summary>
+    private const double LandStopSpeed = 180.0;
+
+    /// <summary>바닥에 붙어 구를 때 수평 감쇠(1/s). 공이 자연스럽게 멈추도록(구름 마찰).</summary>
+    private const double GroundFriction = 2.6;
+
     public SlimePhysicsEngine(AppSettings settings, IWalkableArea area)
     {
         _settings = settings;
@@ -67,21 +87,32 @@ public sealed class SlimePhysicsEngine
 
     public bool IsCurrentPositionValid() => Area.IsRectValid(RectFor(Position.X, Position.Y));
 
+    /// <summary>바닥(또는 아래 벽)에 닿아 더 내려갈 수 없는가. 중력 안착 판정용.</summary>
+    private bool IsGrounded() => !Area.IsRectValid(RectFor(Position.X, Position.Y + 2.0));
+
     /// <summary>deltaTime(초) 기반으로 한 프레임 진행.</summary>
     public PhysicsStepResult Update(double dt)
     {
+        bool gravity = GravityY != 0.0;
+
         // 이동도 회전도 표면스핀도 없을 때만 완전 정지로 간주.
+        // 중력이 있으면 "바닥에 닿아 있을 때"만 정지(공중에 멈춘 공은 낙하해야 함).
         if (dt <= 0 || (IsAtRest
                         && Math.Abs(AngularVelocity) < _settings.SpinStopThreshold
-                        && Math.Abs(SurfaceSpin) < _settings.SurfaceSpinStopThreshold))
+                        && Math.Abs(SurfaceSpin) < _settings.SurfaceSpinStopThreshold
+                        && (!gravity || IsGrounded())))
         {
             AngularVelocity = 0;
             SurfaceSpin = 0;
             return new PhysicsStepResult { Sleeping = true };
         }
 
+        // 0) 중력 가속(농구공)
+        if (gravity)
+            Velocity = Velocity.WithY(Velocity.Y + GravityY * dt);
+
         // 1) 마찰(프레임 독립 지수 감쇠)
-        Velocity *= Math.Exp(-_settings.Friction * dt);
+        Velocity *= Math.Exp(-EffFriction * dt);
 
         // 1.5) 표면 스핀(끌어치기/밀어치기): 샷 축으로 가감속.
         //   음수(끌어치기)면 진행 반대로 힘 → 전진하다 감속·반전해 되돌아온다.
@@ -127,7 +158,7 @@ public sealed class SlimePhysicsEngine
                         maxImpact = impactX;
                         normal = new Vector2(-Math.Sign(dx), 0); // 진행 반대 = 안쪽
                     }
-                    Velocity = Velocity.WithX(-Velocity.X * _settings.Restitution);
+                    Velocity = Velocity.WithX(-Velocity.X * EffRestitution);
                     // 스핀이 벽을 물어 접선(세로) 방향으로 튀고, 스핀은 소모된다.
                     if (Math.Abs(AngularVelocity) > 1e-3)
                     {
@@ -157,7 +188,7 @@ public sealed class SlimePhysicsEngine
                         maxImpact = impactY;
                         normal = new Vector2(0, -Math.Sign(dy)); // 진행 반대 = 안쪽
                     }
-                    Velocity = Velocity.WithY(-Velocity.Y * _settings.Restitution);
+                    Velocity = Velocity.WithY(-Velocity.Y * EffRestitution);
                     // 스핀이 벽을 물어 접선(가로) 방향으로 튀고, 스핀은 소모된다.
                     if (Math.Abs(AngularVelocity) > 1e-3)
                     {
@@ -167,6 +198,14 @@ public sealed class SlimePhysicsEngine
                     collided = true;
                 }
             }
+        }
+
+        // 3.2) 중력: 바닥에 붙었을 때 처리 — 느린 수직 속도 제거(미세 바운스 방지) + 구름 마찰
+        if (gravity && IsGrounded())
+        {
+            if (Math.Abs(Velocity.Y) < LandStopSpeed)
+                Velocity = Velocity.WithY(0);
+            Velocity = Velocity.WithX(Velocity.X * Math.Exp(-GroundFriction * dt));
         }
 
         // 3.5) 스핀: 마그누스로 궤적을 휘게 + 각속도 감쇠 + 회전각 적분
@@ -185,9 +224,11 @@ public sealed class SlimePhysicsEngine
 
         // 4) 저속 정지(진동 방지). 단, 표면 스핀이 남아 있으면(끌어치기 반전 지점 등)
         //    아직 가속할 힘이 있으므로 속도를 죽이지 않는다.
+        //    중력이 있으면 "바닥에 있을 때"만 정지시킨다(포물선 정점의 순간 저속을 정지로 오인 방지).
         bool sleeping = false;
         if (Velocity.Length < _settings.StopThreshold
-            && Math.Abs(SurfaceSpin) < _settings.SurfaceSpinStopThreshold)
+            && Math.Abs(SurfaceSpin) < _settings.SurfaceSpinStopThreshold
+            && (!gravity || IsGrounded()))
         {
             Velocity = Vector2.Zero;
             sleeping = true;

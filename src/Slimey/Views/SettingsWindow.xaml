@@ -215,6 +215,19 @@
                                         MinWidth="160" VerticalAlignment="Center" Click="OnRebindCatch"/>
                             </Grid>
 
+                            <TextBlock Text="농구공 조준" Style="{StaticResource Section}"/>
+                            <Grid Margin="0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="조준 단축키 (기본 Shift)" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="농구공을 잡은 채 이 키를 누르고 뒤로 끌면 포물선 유도선이 나타나고, 마우스를 떼면 그 궤적으로 날아갑니다."
+                                               Style="{StaticResource RowDesc}"/>
+                                    <TextBlock Text="'변경' 후 원하는 키를 누르면 바로 적용됩니다." Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <Button Grid.Column="1" x:Name="AimKeyBtn" Style="{StaticResource GhostButton}"
+                                        MinWidth="160" VerticalAlignment="Center" Click="OnRebindAimKey"/>
+                            </Grid>
+
                             <!-- 저장: 우측 하단에 여유있게 -->
                             <Button x:Name="SaveBtn" Style="{StaticResource AccentButton}" Content="저장"
                                     MinWidth="120" Height="38" HorizontalAlignment="Right"

@@ -85,12 +85,13 @@ public partial class SlimeWindow : Window
 
         Topmost = _settings.AlwaysOnTop;
         _settings.PropertyChanged += OnSettingsChanged;
-        ApplySkin();
-        BuildSpinFx();
 
         _tracker = new ThrowInputTracker(_settings);
         // 충돌 판정은 MonitorLayoutService(IWalkableArea)에 위임 → 멀티 모니터 대응.
         _physics = new SlimePhysicsEngine(_settings, _monitors);
+
+        ApplySkin();      // 스킨 적용 시 UpdateSkinBehavior 가 _physics 를 참조하므로 그 뒤에 호출
+        BuildSpinFx();
 
         _audio = new AudioService(_settings);
         _particles = new ParticleSystem(_settings);
@@ -220,6 +221,7 @@ public partial class SlimeWindow : Window
         Vector2 cursor = CursorPhysical();
         double half = _settings.SlimeSize / 2.0;
         _isDragging = false;
+        _hasPrevBallY = false; // 커서로 회수(순간이동) → 득점 오검출 방지
         _physics.Velocity = Vector2.Zero;
         _physics.AngularVelocity = 0;
         _physics.SurfaceSpin = 0;
@@ -274,11 +276,26 @@ public partial class SlimeWindow : Window
         UpdateSkinBehavior();
     }
 
-    /// <summary>스킨별 물리/애니메이션 동작 반영(당구공은 찌그러지지 않음).</summary>
+    /// <summary>농구공 중력 가속도(px/s^2). 부드러운 낙하.</summary>
+    private const double BasketballGravity = 2200.0;
+
+    /// <summary>농구공 던지기 감쇠(마우스 속도 대비). 살살 던져지도록.</summary>
+    private const double BasketballThrowScale = 0.55;
+    /// <summary>농구공 던지기 속도 상한(px/s).</summary>
+    private const double BasketballMaxThrow = 3300.0;
+    /// <summary>조준 모드에서 당긴 거리(px)당 발사 속도.</summary>
+    private const double BasketballAimScale = 7.0;
+
+    /// <summary>스킨별 물리/애니메이션 동작 반영(당구공은 찌그러지지 않음, 농구공은 중력).</summary>
     private void UpdateSkinBehavior()
     {
         if (_animation != null)
             _animation.Rigid = _settings.Skin != SlimeSkinKind.Jelly; // 젤리만 말랑, 나머지는 단단
+
+        bool basketball = _settings.Skin == SlimeSkinKind.Basketball;
+        _physics.GravityY = basketball ? BasketballGravity : 0.0;
+        // 중력으로 즉시 낙하하도록 렌더 루프를 깨운다(초기화 완료 후에만; _animation 준비 뒤).
+        if (basketball && _animation != null) EnsureRendering();
     }
 
     private void ApplyWindowPosition()
@@ -367,7 +384,7 @@ public partial class SlimeWindow : Window
             if (InSpinCircle(c)) BeginSpinDrag(c); // 공 안쪽 클릭 → 스핀 점 이동
             else BeginAim(c);                       // 공 주위 클릭 → 큐대 조준
         }
-        else BeginGrab(c);
+        else BeginGrab(c);                          // 농구공 포함: 손으로 잡고 던지기(자유 드래그)
     }
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
@@ -434,6 +451,7 @@ public partial class SlimeWindow : Window
         _physics.SurfaceSpin = 0;
         try { CaptureMouse(); } catch { }
         _aimOverlay ??= new AimOverlayWindow(_monitors);
+        _aimOverlay.SetArcMode(false); // 큐대+직선 가이드(농구 조준과 오버레이 공유)
         _aimOverlay.Show();
         UpdateAim(cursor);
     }
@@ -482,6 +500,7 @@ public partial class SlimeWindow : Window
     private void BeginGrab(Vector2 cursor)
     {
         _isDragging = true;
+        _hasPrevBallY = false; // 잡는 동안 위치 점프 → 득점 오검출 방지
         _pressCursor = cursor;
         _dragOffset = cursor - _physics.Position;
         // 잡는 순간 속도/볼 열림 상태 기록(놓을 때 판정). 잡으면 즉시 정지.
@@ -501,9 +520,74 @@ public partial class SlimeWindow : Window
         EnsureRendering();
     }
 
+    // ── 농구 조준(단축키를 누른 채 뒤로 끌기) ────────────────
+    private bool _ballAiming;        // 조준 중(공 고정 + 포물선 유도선)
+    private Vector2 _aimAnchor;      // 조준 기준점(공 중심)
+
+    /// <summary>농구공이고 조준 단축키가 눌려 있는가.</summary>
+    private bool AimKeyHeld =>
+        _settings.Skin == SlimeSkinKind.Basketball
+        && _settings.BasketballAimVk != 0
+        && (GetAsyncKeyState(_settings.BasketballAimVk) & 0x8000) != 0;
+
+    /// <summary>조준 파라미터: 당긴 거리로 발사 속도(포물선) 계산.</summary>
+    private (Vector2 dir, double power) BallAimParams(Vector2 cursor)
+    {
+        Vector2 pull = _aimAnchor - cursor;        // 뒤로 끈 벡터 → 반대(=앵커 방향)로 날아간다
+        double dist = pull.Length;
+        Vector2 dir = dist > 1e-3 ? pull / dist : new Vector2(0, -1);
+        double power = Math.Min(dist * BasketballAimScale, BasketballMaxThrow);
+        return (dir, power);
+    }
+
+    /// <summary>유도선 표시 길이(약 10cm를 실제 화면 물리 px로 환산).</summary>
+    private double AimShowLenPx => 10.0 * (96.0 * _dpiScaleX / 2.54);
+
+    private void UpdateBallAim(Vector2 cursor)
+    {
+        var (dir, power) = BallAimParams(cursor);
+        // 엔진과 동일한 중력/마찰을 넘겨 실제 궤적과 일치시킨다.
+        _aimOverlay?.UpdateArc(_aimAnchor, dir * power, BasketballGravity, _physics.EffectiveFriction, AimShowLenPx);
+    }
+
+    private void BeginBallAim(Vector2 cursor)
+    {
+        _ballAiming = true;
+        double half = _settings.SlimeSize / 2.0;
+        _aimAnchor = _physics.Position + new Vector2(half, half); // 현재 공 위치를 발사 지점으로 고정
+        _physics.Velocity = Vector2.Zero;
+        _hasPrevBallY = false;
+        _aimOverlay ??= new AimOverlayWindow(_monitors);
+        _aimOverlay.SetArcMode(true);
+        _aimOverlay.Show();
+        UpdateBallAim(cursor);
+    }
+
+    private void EndBallAim(bool launch, Vector2 cursor)
+    {
+        _ballAiming = false;
+        _aimOverlay?.Hide();
+        if (!launch) return;
+        var (dir, power) = BallAimParams(cursor);
+        if (power > 60)
+        {
+            _physics.Velocity = dir * power;
+            (SkinHost.Content as ISkinBounce)?.OnBounce();
+        }
+    }
+
     private void DragTo(Vector2 cursor)
     {
         double now = Now;
+
+        // 조준 단축키를 누른 채 끌면: 공은 제자리에 고정되고 포물선 유도선이 나타난다.
+        if (AimKeyHeld)
+        {
+            if (!_ballAiming) BeginBallAim(cursor);
+            else UpdateBallAim(cursor);
+            return;
+        }
+        if (_ballAiming) EndBallAim(launch: false, cursor); // 조준 중 키를 떼면 일반 드래그로 복귀
 
         // 드래그 곡선(curl)으로 스핀을 "충전"한다(관성). 한 방향으로 계속 돌리면
         // 스핀이 쌓여 유지되고, 직선 구간에서도 급히 사라지지 않는다.
@@ -536,6 +620,14 @@ public partial class SlimeWindow : Window
         _isDragging = false;
         try { ReleaseMouseCapture(); } catch { }
 
+        // 조준 중이었다면 유도선 방향/세기로 발사(마우스 속도 무시).
+        if (_ballAiming)
+        {
+            EndBallAim(launch: true, cursor);
+            EnsureRendering();
+            return;
+        }
+
         double moved = (cursor - _pressCursor).Length;
 
         switch (ClassifyRelease(moved, _grabbedSpeed))
@@ -543,7 +635,13 @@ public partial class SlimeWindow : Window
             case ReleaseAction.Throw:
                 CloseBallIfOpen(); // 던지면 열린 볼은 닫힘
                 if (_settings.ThrowMode)
-                    _physics.Velocity = _tracker.ComputeThrowVelocity(Now);
+                {
+                    Vector2 throwV = _tracker.ComputeThrowVelocity(Now);
+                    // 농구공은 살살 던져지도록 감쇠 + 상한(중력 포물선에 맞춰).
+                    if (_settings.Skin == SlimeSkinKind.Basketball)
+                        throwV = (throwV * BasketballThrowScale).ClampLength(BasketballMaxThrow);
+                    _physics.Velocity = throwV;
+                }
                 break;
 
             case ReleaseAction.CatchHold:
@@ -606,6 +704,7 @@ public partial class SlimeWindow : Window
         _overlay?.Render(_particles.Active);
         bool hitTextAlive = _hitText.Update(dt);
         _hitTextOverlay?.Render(_hitText.Active);
+        bool netsAlive = TickHoops(dt); // 골대 그물 스프링(어느 상태에서도 진행)
 
         if (_isDragging)
         {
@@ -620,7 +719,7 @@ public partial class SlimeWindow : Window
         if (_settings.Paused)
         {
             _animation.Tick(dt, Vector2.Zero, _physics.SpinAngle);
-            if (_physics.IsAtRest && _animation.IsResting && !particlesAlive && !hitTextAlive)
+            if (_physics.IsAtRest && _animation.IsResting && !particlesAlive && !hitTextAlive && !netsAlive)
                 StopRendering();
             return;
         }
@@ -632,8 +731,12 @@ public partial class SlimeWindow : Window
             TriggerImpactEffects(r.MaxImpactSpeed, r.CollisionNormal);
             if (r.MaxImpactSpeed > _settings.MaxSpeed * DizzyImpactFraction)
                 _dizzyUntil = now + DizzyDurationSeconds;
+            // 농구공: 벽에 튈 때마다 씸 무늬 변경
+            (SkinHost.Content as ISkinBounce)?.OnBounce();
         }
 
+        ResolveHoopCollisions();
+        CheckScoring();
         ApplyWindowPosition();
         _animation.Tick(dt, _physics.Velocity, _physics.SpinAngle);
         UpdateSpinFx();
@@ -645,7 +748,7 @@ public partial class SlimeWindow : Window
             : SlimeExpression.Normal);
 
         // 완전히 멈추고 형태도 안정되고 파티클도 없고 표정도 원상복귀되면 루프 정지(유휴).
-        if (r.Sleeping && _animation.IsResting && !particlesAlive && !hitTextAlive && now >= _dizzyUntil)
+        if (r.Sleeping && _animation.IsResting && !particlesAlive && !hitTextAlive && !netsAlive && now >= _dizzyUntil)
             StopRendering();
     }
 
@@ -717,6 +820,7 @@ public partial class SlimeWindow : Window
             ResetPositionToCenter();
 
         ApplyWindowPosition();
+        RespawnHoops(); // 모니터 구성이 바뀌면 골대도 새 벽 위치로 다시 세운다
         EnsureRendering();
     }
 
@@ -737,6 +841,7 @@ public partial class SlimeWindow : Window
                 break;
             case nameof(AppSettings.Skin):
                 ClearExtraBalls(); // 테마(스킨) 바꾸면 놓았던 3/4구 당구공도 함께 치운다
+                ClearHoops();      // 농구 골대도 치운다
                 ApplySkin();
                 break;
             case nameof(AppSettings.CueStickMode):
@@ -767,6 +872,7 @@ public partial class SlimeWindow : Window
                 : new BilliardSkin(),
             SlimeSkinKind.Pokeball or SlimeSkinKind.Ultra or SlimeSkinKind.Master
                 => new BallSkin(_settings.Skin),
+            SlimeSkinKind.Basketball => new BasketballSkin(),
             _ => new JellySkin(),
         };
         _expression = SlimeExpression.Normal; // 새 스킨은 기본 표정으로 시작
@@ -823,6 +929,13 @@ public partial class SlimeWindow : Window
         Menu4Ball.Visibility = vis;
         Menu3Ball.Visibility = vis;
         MenuClearBalls.Visibility = _extraBalls.Count > 0 && bil ? Visibility.Visible : Visibility.Collapsed;
+
+        // 농구공 전용: 골대 생성/치우기
+        bool bball = _settings.Skin == SlimeSkinKind.Basketball;
+        var bvis = bball ? Visibility.Visible : Visibility.Collapsed;
+        MenuBasketballSep.Visibility = bvis;
+        MenuHoops.Visibility = bvis;
+        MenuHoops.Header = _hoops.Count > 0 ? "농구골대 치우기" : "농구골대 구현";
     }
 
     private void On4Ball(object sender, RoutedEventArgs e) => SpawnBalls(2, 1);
@@ -942,6 +1055,220 @@ public partial class SlimeWindow : Window
         if (cueChanged) EnsureRendering(); // 수구가 맞았으면 수구 루프 깨우기
     }
 
+    // ── 농구 골대 (좌/우 모니터) ────────────────────────────
+    // 골대 ON 시 물리를 "현실 농구공"에 가깝게 고정(사용자 설정 대신 이 값 사용 — 설정 슬라이더는 무시).
+    private const double HoopRestitution = 0.62; // 반발(살살: 높이의 ~38% 리바운드)
+    private const double HoopFriction = 0.35;    // 공기저항(낮게 → 자연스런 포물선)
+
+    // 뒷판/스윗스팟(뱅크샷): 유리판은 에너지를 크게 죽여 공이 멀리 튕겨나가지 않는다.
+    private const double BackboardRestitution = 0.30; // 림(0.62)보다 훨씬 낮게 → "죽는" 반발
+    private const double BankAssist = 0.40;           // 스윗스팟 유도 비율(살짝 낮춤)
+    private const double BankUpKill = 0.45;           // 위로 튀는 성분 억제(공이 내려앉게)
+    // 빠르게 던져 맞힌 공은 유도를 덜 받는다(멀리서 세게 던져도 잘 들어가는 문제 완화).
+    private const double BankSpeedSoft = 1400.0;      // 이 속도까지는 유도 100%
+    private const double BankSpeedHard = 4200.0;      // 이 속도면 유도 최소치
+
+    private readonly List<HoopWindow> _hoops = new();
+    private ScoreboardWindow? _boardLeft, _boardRight;   // 각 모니터 최상단 점수판
+    private int _scoreLeft, _scoreRight;                 // 좌/우 모니터 점수판의 값
+    private double _prevBallCenterY;
+    private bool _hasPrevBallY;
+
+    private void OnToggleHoops(object sender, RoutedEventArgs e)
+    {
+        if (_hoops.Count > 0) ClearHoops();
+        else SpawnHoops();
+    }
+
+    /// <summary>가장 왼쪽 모니터 좌벽 + 가장 오른쪽 모니터 우벽에 골대를 세우고, 각 모니터 최상단에 점수판을 둔다.</summary>
+    private void SpawnHoops()
+    {
+        ClearHoops();
+        var areas = _monitors.WorkingAreas;
+        if (areas.Count == 0) return;
+
+        Rect leftArea = areas[0], rightArea = areas[0];
+        foreach (var a in areas)
+        {
+            if (a.Left < leftArea.Left) leftArea = a;
+            if (a.Right > rightArea.Right) rightArea = a;
+        }
+
+        AddHoop(HoopSide.Left, leftArea);
+        AddHoop(HoopSide.Right, rightArea);
+
+        // 새 경기: 점수 초기화 + 각 모니터 최상단 점수판 생성.
+        // 단일 모니터면 두 점수판이 겹치지 않게 좌/우로 벌린다.
+        _scoreLeft = _scoreRight = 0;
+        bool sameMonitor = leftArea == rightArea;
+        _boardLeft = new ScoreboardWindow(leftArea, sameMonitor ? 0.25 : 0.5, _settings); _boardLeft.Show();
+        _boardRight = new ScoreboardWindow(rightArea, sameMonitor ? 0.75 : 0.5, _settings); _boardRight.Show();
+
+        // 골대 ON: 물리를 현실 농구공에 가깝게 고정
+        _physics.RestitutionOverride = HoopRestitution;
+        _physics.FrictionOverride = HoopFriction;
+
+        _hasPrevBallY = false;
+        EnsureRendering();
+    }
+
+    private void AddHoop(HoopSide side, Rect area)
+    {
+        var h = new HoopWindow(side, area, _settings);
+        _hoops.Add(h);
+        h.Show();
+    }
+
+    private void ClearHoops()
+    {
+        foreach (var h in _hoops) { try { h.Close(); } catch { } }
+        _hoops.Clear();
+        try { _boardLeft?.Close(); } catch { }
+        try { _boardRight?.Close(); } catch { }
+        _boardLeft = _boardRight = null;
+
+        // 골대 OFF: 물리 오버라이드 해제(사용자 설정으로 복귀)
+        _physics.RestitutionOverride = null;
+        _physics.FrictionOverride = null;
+    }
+
+    private void RespawnHoops()
+    {
+        if (_hoops.Count > 0) SpawnHoops();
+    }
+
+    /// <summary>그물 스프링 적분/렌더. 아직 흔들리는 골대가 있으면 true.</summary>
+    private bool TickHoops(double dt)
+    {
+        bool alive = false;
+        for (int i = 0; i < _hoops.Count; i++)
+            alive |= _hoops[i].UpdateNet(dt);
+        return alive;
+    }
+
+    /// <summary>림(빨간 가장자리)·백보드에 공이 부딪히면 튕겨낸다. 충돌 시 그물도 흔들고 무늬를 바꾼다.</summary>
+    private void ResolveHoopCollisions()
+    {
+        if (_hoops.Count == 0) return;
+        double rBall = _settings.SlimeSize * 0.44;
+        double half = _settings.SlimeSize / 2.0;
+        Vector2 c = _physics.Position + new Vector2(half, half);
+        Vector2 v = _physics.Velocity;
+        bool anyHit = false;
+
+        foreach (var h in _hoops)
+        {
+            bool hit = false;
+            foreach (var edge in h.RimEdges)
+                hit |= ResolveCircle(ref c, ref v, edge, h.RimEdgeRadius, rBall, HoopRestitution);
+
+            // 뒷판: 반발이 낮아(에너지 죽음) 멀리 튕기지 않는다.
+            double speedBefore = v.Length;
+            double hitY = c.Y;
+            if (ResolveRect(ref c, ref v, h.Backboard, rBall, BackboardRestitution))
+            {
+                hit = true;
+                // 스윗스팟(파란 구역)을 맞힌 경우에만 림으로 유도 → 나머지 뒷판은 그냥 죽은 반발.
+                bool inSweet = hitY >= h.SweetSpot.Top - rBall && hitY <= h.SweetSpot.Bottom + rBall;
+                if (inSweet && hitY < h.RimCenter.Y)
+                {
+                    // 세게 맞힐수록 유도가 약해진다(멀리서 강슛이 그냥 들어가지 않게).
+                    double t = Math.Clamp((speedBefore - BankSpeedSoft) / (BankSpeedHard - BankSpeedSoft), 0, 1);
+                    double assist = BankAssist * (1.0 - 0.75 * t);
+                    double toRimX = h.RimCenter.X - c.X;
+                    v = new Vector2(v.X * (1 - assist) + toRimX * assist * 2.2, v.Y);
+                    if (v.Y < 0) v = v.WithY(v.Y * BankUpKill); // 위로 튀는 성분 억제
+                }
+            }
+
+            if (hit)
+            {
+                anyHit = true;
+                h.Nudge(v);
+                (SkinHost.Content as ISkinBounce)?.OnBounce();
+                _audio.Play(ImpactTier.Bonk, 0.4);
+            }
+        }
+
+        if (anyHit)
+        {
+            _physics.SetPositionClamped(c - new Vector2(half, half));
+            _physics.Velocity = v;
+        }
+    }
+
+    private static bool ResolveCircle(ref Vector2 c, ref Vector2 v, Vector2 p, double rEdge, double rBall, double restitution)
+    {
+        Vector2 d = c - p;
+        double dist = d.Length, min = rEdge + rBall;
+        if (dist >= min || dist < 1e-6) return false;
+        Vector2 n = d / dist;
+        c += n * (min - dist); // 겹침 밀어내기
+        double vn = v.X * n.X + v.Y * n.Y;
+        if (vn < 0) { v -= n * ((1 + restitution) * vn); return true; }
+        return false;
+    }
+
+    private static bool ResolveRect(ref Vector2 c, ref Vector2 v, Rect rect, double rBall, double restitution)
+    {
+        double cx = Math.Clamp(c.X, rect.Left, rect.Right);
+        double cy = Math.Clamp(c.Y, rect.Top, rect.Bottom);
+        Vector2 d = c - new Vector2(cx, cy);
+        double dist = d.Length;
+        if (dist >= rBall) return false;
+
+        Vector2 n;
+        if (dist < 1e-6) // 중심이 사각형 안쪽 → 가장 가까운 면으로
+        {
+            double dl = c.X - rect.Left, dr = rect.Right - c.X, dt = c.Y - rect.Top, db = rect.Bottom - c.Y;
+            double mn = Math.Min(Math.Min(dl, dr), Math.Min(dt, db));
+            n = mn == dl ? new Vector2(-1, 0) : mn == dr ? new Vector2(1, 0)
+              : mn == dt ? new Vector2(0, -1) : new Vector2(0, 1);
+            c += n * (rBall + mn);
+        }
+        else { n = d / dist; c += n * (rBall - dist); }
+
+        double vn = v.X * n.X + v.Y * n.Y;
+        if (vn < 0) { v -= n * ((1 + restitution) * vn); return true; }
+        return false;
+    }
+
+    /// <summary>
+    /// 공이 림 개구부를 위→아래로 통과하면 득점. 교차 채점:
+    /// 왼쪽 골대가 먹히면 오른쪽 점수판 +, 오른쪽 골대가 먹히면 왼쪽 점수판 +.
+    /// </summary>
+    private void CheckScoring()
+    {
+        if (_hoops.Count == 0) return;
+        double half = _settings.SlimeSize / 2.0;
+        Vector2 center = _physics.Position + new Vector2(half, half);
+        Vector2 vel = _physics.Velocity;
+        double now = Now;
+
+        if (_hasPrevBallY)
+        {
+            foreach (var h in _hoops)
+            {
+                bool crossedDown = _prevBallCenterY <= h.RimCenter.Y && center.Y >= h.RimCenter.Y;
+                bool withinRim = Math.Abs(center.X - h.RimCenter.X) <= h.RimHalfWidth;
+                if (crossedDown && withinRim && vel.Y > 0 && now >= h.ScoreCooldownUntil)
+                {
+                    h.OnScored(vel);
+                    h.ScoreCooldownUntil = now + 0.6;
+                    _audio.Play(ImpactTier.Bonk, 0.5); // 스위시 대용 효과음
+                    (SkinHost.Content as ISkinBounce)?.OnBounce();
+
+                    // 교차 채점: 먹힌 골대의 반대쪽 점수판 +1
+                    if (h.Side == HoopSide.Left) { _scoreRight++; _boardRight?.SetScore(_scoreRight); }
+                    else { _scoreLeft++; _boardLeft?.SetScore(_scoreLeft); }
+                }
+            }
+        }
+
+        _prevBallCenterY = center.Y;
+        _hasPrevBallY = true;
+    }
+
     // ── 정리 ────────────────────────────────────────────────
     public void ShutdownCleanup()
     {
@@ -956,6 +1283,7 @@ public partial class SlimeWindow : Window
         MouseLeftButtonUp -= OnMouseLeftButtonUp;
 
         ClearExtraBalls();
+        ClearHoops();
         try { _aimOverlay?.Close(); } catch { }
         _aimOverlay = null;
         _overlay?.ShutdownCleanup();

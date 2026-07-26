@@ -19,6 +19,15 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // 오프라인 미리보기: `--render-preview <출력폴더>` 로 실행하면 스킨/골대를 PNG로 저장하고 종료.
+        if (e.Args.Length >= 2 && e.Args[0] == "--render-preview")
+        {
+            try { PreviewRenderer.Run(e.Args[1]); }
+            catch (Exception ex) { Logger.Error("preview render failed", ex); }
+            Shutdown();
+            return;
+        }
+
         RegisterGlobalExceptionHandlers();
         Logger.Info("Slimey starting.");
 

@@ -17,4 +17,7 @@ public enum SlimeSkinKind
 
     /// <summary>마스터볼 — 보라+분홍 M.</summary>
     Master = 4,
+
+    /// <summary>농구공 — 주황 구체에 검정 씸. 튈 때마다 무늬 변경 + 골대 넣기.</summary>
+    Basketball = 5,
 }
