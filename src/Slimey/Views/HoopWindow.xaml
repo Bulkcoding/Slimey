@@ -1,0 +1,14 @@
+<Window x:Class="Slimey.Views.HoopWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="SlimeyHoop"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" Focusable="False" IsHitTestVisible="False"
+        ResizeMode="NoResize" SizeToContent="Manual"
+        Width="100" Height="100" Left="0" Top="0">
+    <!-- 골대 비주얼(백보드/림/그물/점수)은 전부 코드에서 px 좌표로 Root 에 그린다.
+         Viewbox 가 px 캔버스를 창(DIP) 크기에 정확히 맞춰 스케일한다. -->
+    <Viewbox Stretch="Fill" IsHitTestVisible="False">
+        <Canvas x:Name="Root" IsHitTestVisible="False"/>
+    </Viewbox>
+</Window>

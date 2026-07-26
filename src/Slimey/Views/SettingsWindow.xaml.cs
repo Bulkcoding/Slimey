@@ -34,6 +34,7 @@ public partial class SettingsWindow : Window
         DataContext = settings;
         BuildThemeCards();
         UpdateRebindText();
+        UpdateAimKeyText();
         UpdateBilliardSection();
         _settings.PropertyChanged += (_, ev) => { if (ev.PropertyName == nameof(AppSettings.Skin)) UpdateBilliardSection(); };
         PreviewKeyDown += OnPreviewKeyDown;
@@ -70,6 +71,7 @@ public partial class SettingsWindow : Window
         (SlimeSkinKind.Pokeball, "몬스터볼"),
         (SlimeSkinKind.Ultra, "하이퍼볼"),
         (SlimeSkinKind.Master, "마스터볼"),
+        (SlimeSkinKind.Basketball, "농구공"),
     };
 
     private void BuildThemeCards()
@@ -123,6 +125,7 @@ public partial class SettingsWindow : Window
     {
         SlimeSkinKind.Billiard => new BilliardSkin(),
         SlimeSkinKind.Pokeball or SlimeSkinKind.Ultra or SlimeSkinKind.Master => new BallSkin(kind),
+        SlimeSkinKind.Basketball => new BasketballSkin(),
         _ => new JellySkin(),
     };
 
@@ -153,8 +156,40 @@ public partial class SettingsWindow : Window
              | (m.HasFlag(ModifierKeys.Windows) ? 8 : 0);
     }
 
+    // ── 농구공 조준 단축키(단일 키, 즉시 적용) ───────────────
+    private bool _capturingAimKey;
+
+    private void OnRebindAimKey(object sender, RoutedEventArgs e)
+    {
+        _capturingAimKey = true;
+        AimKeyBtn.Content = "키 입력…";
+    }
+
+    private void UpdateAimKeyText()
+        => AimKeyBtn.Content = _settings.BasketballAimVk == 0
+            ? "(없음)"
+            : KeyInterop.KeyFromVirtualKey(_settings.BasketballAimVk).ToString();
+
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_capturingAimKey)
+        {
+            Key k = e.Key == Key.System ? e.SystemKey : e.Key;
+            // 좌/우 수정자는 공용 VK 로 저장(Shift/Ctrl/Alt 를 좌우 구분 없이 인식)
+            int vk = k switch
+            {
+                Key.LeftShift or Key.RightShift => 0x10,
+                Key.LeftCtrl or Key.RightCtrl => 0x11,
+                Key.LeftAlt or Key.RightAlt => 0x12,
+                _ => KeyInterop.VirtualKeyFromKey(k),
+            };
+            _settings.BasketballAimVk = vk;
+            _capturingAimKey = false;
+            UpdateAimKeyText();
+            e.Handled = true;
+            return;
+        }
+
         if (!_capturingHotkey) return;
         Key key = e.Key == Key.System ? e.SystemKey : e.Key;
         if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift

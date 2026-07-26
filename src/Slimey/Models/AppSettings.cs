@@ -146,6 +146,13 @@ public sealed class AppSettings : INotifyPropertyChanged
     private int _catchHotkeyMouse;
     public int CatchHotkeyMouse { get => _catchHotkeyMouse; set => Set(ref _catchHotkeyMouse, value); }
 
+    /// <summary>
+    /// 농구공 조준 단축키 가상키(누른 상태로 공을 뒤로 끌면 포물선 유도선 → 떼면 발사).
+    /// 기본 Shift(0x10). 0이면 조준 기능 사용 안 함.
+    /// </summary>
+    private int _basketballAimVk = 0x10;
+    public int BasketballAimVk { get => _basketballAimVk; set => Set(ref _basketballAimVk, value); }
+
     /// <summary>효과음 사용(Phase 4).</summary>
     private bool _soundEnabled = true;
     public bool SoundEnabled { get => _soundEnabled; set => Set(ref _soundEnabled, value); }

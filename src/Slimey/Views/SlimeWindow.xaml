@@ -28,6 +28,8 @@
             <MenuItem x:Name="Menu4Ball" Header="4구 놓기 (빨강2·노랑1)" Click="On4Ball" Style="{StaticResource DarkMenuItem}"/>
             <MenuItem x:Name="Menu3Ball" Header="3구 놓기 (빨강1·노랑1)" Click="On3Ball" Style="{StaticResource DarkMenuItem}"/>
             <MenuItem x:Name="MenuClearBalls" Header="당구공 치우기" Click="OnClearBalls" Style="{StaticResource DarkMenuItem}"/>
+            <Separator x:Name="MenuBasketballSep" Style="{StaticResource DarkSeparator}"/>
+            <MenuItem x:Name="MenuHoops" Header="농구골대 구현" Click="OnToggleHoops" Style="{StaticResource DarkMenuItem}"/>
             <Separator Style="{StaticResource DarkSeparator}"/>
             <MenuItem Header="종료" Click="OnExit" Style="{StaticResource DarkMenuItem}"/>
         </ContextMenu>

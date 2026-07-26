@@ -8,6 +8,10 @@
     <Canvas x:Name="AimCanvas" IsHitTestVisible="False">
         <!-- 조준 가이드(공이 나갈 방향) -->
         <Line x:Name="GuideLine" Stroke="#88FFFFFF" StrokeThickness="2" StrokeDashArray="4 4"/>
+        <!-- 포물선 궤적(농구 조준): 중력을 감안한 실제 비행 경로 -->
+        <Polyline x:Name="Arc" Stroke="#C8FFD9A0" StrokeThickness="3" StrokeDashArray="3 3"
+                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
+        <Ellipse x:Name="ArcTip" Width="12" Height="12" Fill="#E8F0A030" Visibility="Collapsed"/>
         <!-- 큐대(고정 길이·뒤로 당겨짐, 실제 큐 색: 밑동 검정→갈색→손잡이→단풍나무→흰 페룰) -->
         <Polygon x:Name="Cue">
             <Polygon.Fill>
