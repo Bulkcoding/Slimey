@@ -109,6 +109,34 @@ public partial class SettingsWindow : Window
 
     private void OnResetPosition(object sender, RoutedEventArgs e) => _slime.ResetPositionPublic();
 
+    /// <summary>최신 릴리스 노트를 받아 팝업으로 보여준다(네트워크 실패 시 안내만).</summary>
+    private async void OnShowReleaseNotes(object sender, RoutedEventArgs e)
+    {
+        var btn = sender as System.Windows.Controls.Button;
+        string? original = btn?.Content as string;
+        if (btn != null) { btn.IsEnabled = false; btn.Content = "불러오는 중…"; }
+
+        try
+        {
+            var notes = await UpdateService.FetchLatestNotesAsync();
+            if (notes == null)
+            {
+                MessageBox.Show(this, "릴리스 정보를 가져오지 못했습니다. 네트워크 상태를 확인해 주세요.",
+                    "Slimey", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            new ReleaseNotesWindow(notes, _settings) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to show release notes on demand.", ex);
+        }
+        finally
+        {
+            if (btn != null) { btn.IsEnabled = true; btn.Content = original ?? "최근 변경 내용 보기"; }
+        }
+    }
+
     private void UpdateBilliardSection()
         => BilliardSection.Visibility = _settings.Skin == SlimeSkinKind.Billiard ? Visibility.Visible : Visibility.Collapsed;
 

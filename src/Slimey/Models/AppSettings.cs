@@ -223,6 +223,10 @@ public sealed class AppSettings : INotifyPropertyChanged
     private bool _slimeVisible = true;
     public bool SlimeVisible { get => _slimeVisible; set => Set(ref _slimeVisible, value); }
 
+    /// <summary>업데이트가 적용된 뒤 변경 내용(릴리스 노트) 팝업을 띄울지.</summary>
+    private bool _showReleaseNotes = true;
+    public bool ShowReleaseNotes { get => _showReleaseNotes; set => Set(ref _showReleaseNotes, value); }
+
     /// <summary>표시할 스킨(젤리/당구공 등).</summary>
     private SlimeSkinKind _skin = SlimeSkinKind.Jelly;
     public SlimeSkinKind Skin { get => _skin; set => Set(ref _skin, value); }

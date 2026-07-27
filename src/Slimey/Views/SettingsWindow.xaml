@@ -160,8 +160,22 @@
                                 </Grid>
                             </StackPanel>
 
-                            <Button Style="{StaticResource GhostButton}" Content="위치 초기화" HorizontalAlignment="Left"
-                                    MinWidth="150" Height="40" Padding="26,0" Margin="0,18,0,6" Click="OnResetPosition"/>
+                            <TextBlock Text="업데이트" Style="{StaticResource Section}"/>
+                            <Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="변경 내용 알리기" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="업데이트가 적용되면 무엇이 달라졌는지 팝업으로 보여줍니다." Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding ShowReleaseNotes}"/>
+                            </Grid>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,18,0,6">
+                                <Button Style="{StaticResource GhostButton}" Content="위치 초기화"
+                                        MinWidth="150" Height="40" Padding="26,0" Click="OnResetPosition"/>
+                                <Button Style="{StaticResource GhostButton}" Content="최근 변경 내용 보기"
+                                        MinWidth="150" Height="40" Padding="26,0" Margin="10,0,0,0"
+                                        Click="OnShowReleaseNotes"/>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- ══ 테마 ══ -->

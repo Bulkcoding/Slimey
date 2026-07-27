@@ -72,10 +72,40 @@ public partial class App : Application
         // 설정 변경 시 디바운스 자동 저장.
         _store.AttachAutoSave(_settings);
 
+        // 방금 업데이트가 적용됐다면 변경 내용을 한 번 보여준다.
+        ShowReleaseNotesIfJustUpdated();
+
         // 백그라운드로 최신 릴리스 확인 → 있으면 받아 두고 다음 실행 때 조용히 적용.
         _ = UpdateService.CheckAndStageAsync();
 
         Logger.Info("Slimey started.");
+    }
+
+    /// <summary>
+    /// 업데이트 직후라면 릴리스 노트 팝업을 띄운다.
+    /// 노트는 1회성이라, 설정으로 꺼 둔 경우에도 소비(삭제)해서 다음 업데이트 때 옛 노트가 뜨지 않게 한다.
+    /// </summary>
+    private void ShowReleaseNotesIfJustUpdated()
+    {
+        try
+        {
+            var notes = UpdateService.TryConsumeAppliedNotes();
+            if (notes == null) return;
+
+            Logger.Info($"Updated to v{notes.Version}.");
+            if (_settings is { ShowReleaseNotes: false }) return;
+
+            // 슬라임 창이 자리를 잡은 뒤 뜨도록 뒤로 미룬다(시작을 막지 않음).
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try { new ReleaseNotesWindow(notes, _settings).Show(); }
+                catch (Exception ex) { Logger.Error("Failed to show release notes.", ex); }
+            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Release notes check failed.", ex);
+        }
     }
 
     private void RegisterGlobalExceptionHandlers()
