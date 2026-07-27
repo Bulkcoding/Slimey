@@ -8,24 +8,21 @@ using Canvas = System.Windows.Controls.Canvas;
 using Color = System.Windows.Media.Color;
 using Brush = System.Windows.Media.Brush;
 using Point = System.Windows.Point;
-using Size = System.Windows.Size;
 using ColorConverter = System.Windows.Media.ColorConverter;
 using Polygon = System.Windows.Shapes.Polygon;
-using TextBlock = System.Windows.Controls.TextBlock;
-using FontFamily = System.Windows.Media.FontFamily;
+using Ellipse = System.Windows.Shapes.Ellipse;
 
 namespace Slimey.Views;
 
 /// <summary>
 /// 볼링판(레인) 오버레이 — 주 모니터 작업영역을 덮는 클릭 통과 창.
-/// 나무 레인 + 거터 + 파울 라인 + 조준 화살표 + 핀덱 + 점수를 그린다.
+/// 나무 레인 + 거터 + 파울 라인 + 조준 화살표 + 핀덱을 그린다.
 /// </summary>
 public partial class LaneOverlayWindow : Window
 {
     private readonly MonitorLayoutService _monitors;
     private double _scaleX = 1, _scaleY = 1;
     private Rect _wa;
-    private TextBlock? _score;
 
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000, WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000;
@@ -36,6 +33,15 @@ public partial class LaneOverlayWindow : Window
     {
         _monitors = monitors;
         InitializeComponent();
+    }
+    // 창을 띄우지 않는 개발용 렌더에서 실제 레인 그리기 코드를 그대로 검증한다.
+    internal Canvas PreviewRoot => Root;
+    internal void PreparePreview(Rect bounds)
+    {
+        _wa = bounds;
+        _scaleX = _scaleY = 1;
+        Root.Width = bounds.Width;
+        Root.Height = bounds.Height;
     }
 
     protected override void OnSourceInitialized(EventArgs e)
@@ -86,94 +92,109 @@ public partial class LaneOverlayWindow : Window
         _alleyHalfTop = alleyHalfTop; _alleyHalfBot = alleyHalfBot;
         Root.Children.Clear();
 
-        // ── 거터(양옆 어두운 홈, 사다리꼴) ──
-        var gutterBrush = VGrad(("#22252D", 0), ("#0E1016", 0.5), ("#24272F", 1));
-        // 왼쪽
-        Root.Children.Add(Poly(gutterBrush, 0.92,
+        // 거터: 바깥 립, 깊은 홈, 레인 쪽 경계의 3단 구조.
+        var gutterBrush = VGrad(("#3D4652", 0), ("#111720", 0.40), ("#252D38", 1));
+        Root.Children.Add(Poly(gutterBrush, 0.98,
             (AlleyXp(topY, -1), topY), (LaneXp(topY, -1), topY),
             (LaneXp(botY, -1), botY), (AlleyXp(botY, -1), botY)));
-        // 오른쪽
-        Root.Children.Add(Poly(gutterBrush, 0.92,
+        Root.Children.Add(Poly(gutterBrush, 0.98,
             (LaneXp(topY, +1), topY), (AlleyXp(topY, +1), topY),
             (AlleyXp(botY, +1), botY), (LaneXp(botY, +1), botY)));
-        // 거터 안쪽 하이라이트(레인과 경계)
-        Root.Children.Add(Poly(new SolidColorBrush(Color.FromArgb(0x40, 0, 0, 0)), 1.0,
-            (LaneXp(topY, -1), topY), (LaneXp(topY, -1) + 2, topY),
-            (LaneXp(botY, -1) + 4, botY), (LaneXp(botY, -1), botY)));
 
-        // ── 레인 바닥(단풍나무, 사다리꼴; 아래로 갈수록 밝아 원근 강조) ──
+        double railTop = Math.Max(2.0, (_alleyHalfTop - _laneHalfTop) * 0.16);
+        double railBot = Math.Max(5.0, (_alleyHalfBot - _laneHalfBot) * 0.16);
+        var rail = VGrad(("#697584", 0), ("#343E4B", 0.55), ("#596573", 1));
+        Root.Children.Add(Poly(rail, 0.95,
+            (AlleyXp(topY, -1), topY), (AlleyXp(topY, -1) + railTop, topY),
+            (AlleyXp(botY, -1) + railBot, botY), (AlleyXp(botY, -1), botY)));
+        Root.Children.Add(Poly(rail, 0.95,
+            (AlleyXp(topY, +1) - railTop, topY), (AlleyXp(topY, +1), topY),
+            (AlleyXp(botY, +1), botY), (AlleyXp(botY, +1) - railBot, botY)));
+
+        // 따뜻한 단풍나무 베이스. 아래로 갈수록 밝아져 원근이 자연스럽게 드러난다.
         var wood = new LinearGradientBrush { StartPoint = new Point(0.5, 0), EndPoint = new Point(0.5, 1) };
-        wood.GradientStops.Add(new GradientStop(C("#B98E4F"), 0.0));   // 원경(어두움)
-        wood.GradientStops.Add(new GradientStop(C("#D8B678"), 0.5));
-        wood.GradientStops.Add(new GradientStop(C("#ECD199"), 1.0));   // 근경(밝음)
+        wood.GradientStops.Add(new GradientStop(C("#9D6B35"), 0.0));
+        wood.GradientStops.Add(new GradientStop(C("#C99755"), 0.18));
+        wood.GradientStops.Add(new GradientStop(C("#E0B871"), 0.62));
+        wood.GradientStops.Add(new GradientStop(C("#F0D39A"), 1.0));
         wood.Freeze();
-        Root.Children.Add(Poly(wood, 0.95,
+        Root.Children.Add(Poly(wood, 0.99,
             (LaneXp(topY, -1), topY), (LaneXp(topY, +1), topY),
             (LaneXp(botY, +1), botY), (LaneXp(botY, -1), botY)));
 
-        // 널(결) 라인 — 소실점으로 수렴(원근)
-        var plankBrush = new SolidColorBrush(Color.FromArgb(0x2A, 0x5A, 0x3A, 0x12)); plankBrush.Freeze();
-        int planks = 9;
-        for (int i = 1; i < planks; i++)
+        // 20개 판재를 미세하게 교차 착색하고 이음선을 소실점으로 수렴시킨다.
+        const int boards = 20;
+        var boardLight = new SolidColorBrush(Color.FromArgb(0x18, 0xFF, 0xF2, 0xCC)); boardLight.Freeze();
+        var boardDark = new SolidColorBrush(Color.FromArgb(0x10, 0x61, 0x35, 0x13)); boardDark.Freeze();
+        for (int i = 0; i < boards; i++)
         {
-            double s = -1.0 + 2.0 * i / planks;
+            double s0 = -1.0 + 2.0 * i / boards;
+            double s1 = -1.0 + 2.0 * (i + 1) / boards;
+            Root.Children.Add(Poly(i % 4 is 0 or 3 ? boardLight : boardDark, 1.0,
+                (_centerX + s0 * _laneHalfTop, topY),
+                (_centerX + s1 * _laneHalfTop, topY),
+                (_centerX + s1 * _laneHalfBot, botY),
+                (_centerX + s0 * _laneHalfBot, botY)));
+        }
+        var seam = new SolidColorBrush(Color.FromArgb(0x35, 0x6B, 0x42, 0x1E)); seam.Freeze();
+        for (int i = 1; i < boards; i++)
+        {
+            double s = -1.0 + 2.0 * i / boards;
             Root.Children.Add(PlankLine(
                 _centerX + s * _laneHalfTop, topY,
-                _centerX + s * _laneHalfBot, botY, plankBrush));
+                _centerX + s * _laneHalfBot, botY, seam, 0.85));
         }
 
-        // ── 핀덱(뒤쪽 살짝 어두운 판, 사다리꼴) ──
-        Root.Children.Add(Poly(VGrad(("#A9834C", 0), ("#C6A46B", 1)), 0.85,
+        // 핀덱과 뒤쪽 피트는 바닥과 명확히 분리해 핀이 떠 보이지 않게 한다.
+        Root.Children.Add(Poly(VGrad(("#8A5B30", 0), ("#C48E4D", 0.40), ("#D8AF6C", 1)), 0.88,
             (LaneXp(topY, -1), topY), (LaneXp(topY, +1), topY),
             (LaneXp(deckBotY, +1), deckBotY), (LaneXp(deckBotY, -1), deckBotY)));
+        double pitY = topY + Math.Min((deckBotY - topY) * 0.20, _laneHalfTop * 0.20);
+        Root.Children.Add(Poly(VGrad(("#242A31", 0), ("#59616A", 1)), 0.92,
+            (AlleyXp(topY, -1), topY), (AlleyXp(topY, +1), topY),
+            (LaneXp(pitY, +1), pitY), (LaneXp(pitY, -1), pitY)));
         Root.Children.Add(PlankLine(LaneXp(deckBotY, -1), deckBotY, LaneXp(deckBotY, +1), deckBotY,
-            new SolidColorBrush(Color.FromArgb(0x55, 0x4A, 0x30, 0x10)), 2.2));
+            new SolidColorBrush(Color.FromArgb(0x70, 0x6A, 0x42, 0x1C)), 2.0));
 
-        // ── 조준 화살표(가운데가 위로 솟은 7개 다트, 원근 크기) ──
-        var arrowBrush = new SolidColorBrush(C("#8A5A22")); arrowBrush.Freeze();
+        // 레인 안쪽 립과 그림자를 마지막에 올려 거터의 깊이를 만든다.
+        var lipLight = new SolidColorBrush(Color.FromArgb(0xA8, 0xD3, 0xC0, 0x91)); lipLight.Freeze();
+        var lipShade = new SolidColorBrush(Color.FromArgb(0x82, 0x18, 0x1C, 0x23)); lipShade.Freeze();
+        Root.Children.Add(PlankLine(LaneXp(topY, -1), topY, LaneXp(botY, -1), botY, lipShade, 4.2));
+        Root.Children.Add(PlankLine(LaneXp(topY, +1), topY, LaneXp(botY, +1), botY, lipShade, 4.2));
+        Root.Children.Add(PlankLine(LaneXp(topY, -1) + 1.3, topY, LaneXp(botY, -1) + 3.2, botY, lipLight, 1.0));
+        Root.Children.Add(PlankLine(LaneXp(topY, +1) - 1.3, topY, LaneXp(botY, +1) - 3.2, botY, lipLight, 1.0));
+
+        // 중앙 오일 패턴: 투구 방향으로 길게 이어지는 은은한 반사.
+        double sheenTop = _laneHalfTop * 0.42;
+        double sheenBot = _laneHalfBot * 0.34;
+        var sheen = HGrad(("#00FFFFFF", 0), ("#34FFF8DD", 0.5), ("#00FFFFFF", 1));
+        Root.Children.Add(Poly(sheen, 0.72,
+            (_centerX - sheenTop, deckBotY), (_centerX + sheenTop, deckBotY),
+            (_centerX + sheenBot, foulY), (_centerX - sheenBot, foulY)));
+
+        // 7개 조준 다트.
+        var arrowBrush = new SolidColorBrush(C("#6E3D18")); arrowBrush.Freeze();
         double aHalf = HalfAt(_laneHalfTop, _laneHalfBot, arrowsY);
-        double aSize = aHalf * 0.085;
+        double aSize = aHalf * 0.072;
         for (int i = 0; i < 7; i++)
         {
             double t = (i - 3) / 3.0;
             double ax = _centerX + t * (aHalf * 0.72);
-            double ay = arrowsY + Math.Abs(t) * (aHalf * 0.28);
+            double ay = arrowsY + Math.Abs(t) * (aHalf * 0.24);
             Root.Children.Add(Arrow(ax, ay, aSize, arrowBrush));
         }
 
-        // ── 파울 라인(빨강, 레인 폭 전체) ──
+        // 파울 라인 뒤의 어프로치 도트.
+        double approachY = foulY + (botY - foulY) * 0.48;
+        double approachHalf = HalfAt(_laneHalfTop, _laneHalfBot, approachY);
+        for (int i = -2; i <= 2; i++)
+            Root.Children.Add(Dot(_centerX + i * approachHalf * 0.31, approachY, Math.Max(2.2, approachHalf * 0.016), arrowBrush));
+
+        // 짙은 청회색 파울 라인과 앞면 하이라이트.
         Root.Children.Add(PlankLine(LaneXp(foulY, -1), foulY, LaneXp(foulY, +1), foulY,
-            new SolidColorBrush(C("#C62A24")), Math.Max(2.5, HalfAt(0, 0, foulY) + _laneHalfBot * 0.012)));
-
-        // ── 점수 텍스트(레인 상단 중앙) ──
-        _score = new TextBlock
-        {
-            Text = "1F · 1구 · 0점",
-            FontFamily = new FontFamily("Segoe UI"),
-            FontWeight = FontWeights.Bold,
-            FontSize = LH(_laneHalfBot * 0.16),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xFF, 0xF4, 0xD6)),
-            Effect = new System.Windows.Media.Effects.DropShadowEffect { Color = Colors.Black, BlurRadius = 6, ShadowDepth = 1, Opacity = 0.85 },
-        };
-        _score.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        Canvas.SetLeft(_score, LX(_centerX) - _score.DesiredSize.Width / 2);
-        Canvas.SetTop(_score, LY(topY) - _score.DesiredSize.Height - LH(_laneHalfBot * 0.03));
-        Root.Children.Add(_score);
-    }
-
-    private string? _statusText;
-    private Color _statusColor;
-
-    /// <summary>상단 상태 표시(프레임/투구/점수, 또는 STRIKE·거터 같은 배너).</summary>
-    public void SetStatus(string text, Color color)
-    {
-        if (_score == null) return;
-        if (_statusText == text && _statusColor == color) return; // 매 프레임 재할당 방지
-        _statusText = text;
-        _statusColor = color;
-        _score.Text = text;
-        var b = new SolidColorBrush(color); b.Freeze();
-        _score.Foreground = b;
+            new SolidColorBrush(C("#273746")), Math.Max(3.2, _laneHalfBot * 0.018)));
+        Root.Children.Add(PlankLine(LaneXp(foulY, -1), foulY + 2.2, LaneXp(foulY, +1), foulY + 2.2,
+            new SolidColorBrush(Color.FromArgb(0x78, 0xFF, 0xE8, 0xB7)), 1.0));
     }
 
     // ── 그리기 헬퍼(물리 px 입력) ──
@@ -206,6 +227,21 @@ public partial class LaneOverlayWindow : Window
         };
     }
 
+    private Ellipse Dot(double cx, double cy, double radius, Brush fill)
+    {
+        var dot = new Ellipse
+        {
+            Width = LW(radius * 2),
+            Height = LH(radius * 2),
+            Fill = fill,
+            Opacity = 0.82,
+            IsHitTestVisible = false,
+        };
+        Canvas.SetLeft(dot, LX(cx) - dot.Width / 2);
+        Canvas.SetTop(dot, LY(cy) - dot.Height / 2);
+        return dot;
+    }
+
     private static Brush VGrad(params (string hex, double off)[] stops)
     {
         var b = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
@@ -214,5 +250,12 @@ public partial class LaneOverlayWindow : Window
         return b;
     }
 
+    private static Brush HGrad(params (string hex, double off)[] stops)
+    {
+        var b = new LinearGradientBrush { StartPoint = new Point(0, 0.5), EndPoint = new Point(1, 0.5) };
+        foreach (var (hex, off) in stops) b.GradientStops.Add(new GradientStop(C(hex), off));
+        b.Freeze();
+        return b;
+    }
     private static Color C(string hex) => (Color)ColorConverter.ConvertFromString(hex);
 }

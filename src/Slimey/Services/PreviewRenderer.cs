@@ -14,7 +14,7 @@ using Brush = System.Windows.Media.Brush;
 namespace Slimey.Services;
 
 /// <summary>
-/// 개발용 오프라인 렌더러. 농구공 스킨/골대를 창을 띄우지 않고 PNG로 저장한다.
+/// 개발용 오프라인 렌더러. 스포츠 스킨과 경기장을 창을 띄우지 않고 PNG로 저장한다.
 /// 일반 실행 경로에는 영향 없음(커맨드라인 인자로만 진입).
 /// </summary>
 internal static class PreviewRenderer
@@ -36,8 +36,71 @@ internal static class PreviewRenderer
         // 골대(좌/우)
         SaveHoop(HoopSide.Left, settings, Path.Combine(outDir, "hoop_left.png"));
         SaveHoop(HoopSide.Right, settings, Path.Combine(outDir, "hoop_right.png"));
+        // 볼링핀 단독 + 실제 레인 배치
+        Save(Wrap(new PinSkin(), 320), 320, 320, Path.Combine(outDir, "bowling_pin.png"));
+        SaveBowlingLane(Path.Combine(outDir, "bowling_lane.png"));
+        SaveBowlingScoreboard(Path.Combine(outDir, "bowling_scoreboard.png"));
     }
 
+    private static void SaveBowlingScoreboard(string path)
+    {
+        var board = new BowlingScoreboardWindow(new Rect(0, 0, 1920, 1080));
+        var frames = new List<BowlingFrameDisplay>
+        {
+            new("", "X", "", 30, true),
+            new("", "X", "", 60, true),
+            new("9", "/", "", 80, true),
+            new("7", "–", "", 87, true),
+            new("8", "", "", null, false),
+            new("", "", "", null, false),
+            new("", "", "", null, false),
+            new("", "", "", null, false),
+            new("", "", "", null, false),
+            new("", "", "", null, false),
+        };
+        board.SetGame(5, 2, 87, frames, "TURN · 5 FRAME", Color.FromRgb(0xFF, 0xD1, 0x3A), false);
+        FrameworkElement panel = board.DetachPreviewPanel();
+        var host = new Border { Width = 760, Height = 330, Background = Gray, Child = panel };
+        Save(host, 760, 330, path);
+    }
+    private static void SaveBowlingLane(string path)
+    {
+        const int w = 900, h = 700;
+        var monitors = new MonitorLayoutService();
+        var lane = new LaneOverlayWindow(monitors);
+        lane.PreparePreview(new Rect(0, 0, w, h));
+
+        const double cx = w / 2.0, topY = 68, botY = 685, foulY = 590;
+        const double laneHalfTop = 142, laneHalfBot = 238;
+        const double alleyHalfTop = 202, alleyHalfBot = 340;
+        const double deckBotY = 298, arrowsY = 425;
+        lane.Setup(cx, topY, botY, foulY, laneHalfTop, laneHalfBot,
+                   alleyHalfTop, alleyHalfBot, deckBotY, arrowsY);
+
+        Canvas root = lane.PreviewRoot;
+        lane.Content = null;
+
+        const double size = 96, box = 320 * PinWindow.VisualScale;
+        const double backY = 160, hGap = size * 0.72, vGap = size * 0.62;
+        int[] counts = { 4, 3, 2, 1 };
+        for (int row = 0; row < counts.Length; row++)
+        {
+            int count = counts[row];
+            double y = backY + row * vGap;
+            for (int i = 0; i < count; i++)
+            {
+                double x = cx + (i - (count - 1) / 2.0) * hGap;
+                var pin = new PinSkin { Width = box, Height = box };
+                Canvas.SetLeft(pin, x - box / 2);
+                Canvas.SetTop(pin, y - box / 2);
+                root.Children.Add(pin);
+            }
+        }
+
+        var host = new Border { Width = w, Height = h, Background = Gray, Child = root };
+        Save(host, w, h, path);
+        monitors.Dispose();
+    }
     private static void SaveHoop(HoopSide side, AppSettings settings, string path)
     {
         var hoop = new HoopWindow(side, new Rect(0, 0, 1920, 1080), settings);

@@ -1450,6 +1450,7 @@ public partial class SlimeWindow : Window
     // ── 볼링 모드 (레인 + 10핀) ─────────────────────────────
     private readonly List<PinWindow> _pins = new();
     private LaneOverlayWindow? _lane;
+    private BowlingScoreboardWindow? _bowlingScoreboard;
     private bool _bowlingActive;        // 볼링 물리 루프 가동 중
     private double _bowlingLastTime;
     private BowlingLayout _bl;          // 현재 레인 지오메트리(가둠 판정에 사용)
@@ -1465,10 +1466,12 @@ public partial class SlimeWindow : Window
     private bool _bowlingOn;
     private bool BowlingOn => _bowlingOn;
 
-    // ── 게임 진행(10프레임 × 2구) ───────────────────────────
+    // ── 게임 진행(10프레임, 마지막 프레임은 보너스 포함 최대 3구) ────
     private const int TotalFrames = 10;
+    private readonly List<int>[] _frameRolls =
+        Enumerable.Range(0, TotalFrames).Select(_ => new List<int>(3)).ToArray();
     private int _frame = 1;             // 1..10
-    private int _throwNo = 1;           // 1 또는 2
+    private int _throwNo = 1;           // 1 또는 2, 10프레임 보너스 투구는 3
     private int _totalScore;
     private bool _gameOver;
     private bool _ballLaunched;         // 이번 투구가 던져졌는가
@@ -1498,8 +1501,9 @@ public partial class SlimeWindow : Window
         _totalScore = 0;
         _gameOver = false;
         _banner = null;
+        foreach (var rolls in _frameRolls) rolls.Clear();
+        ResetBallToStart();    // 핀덱의 공을 먼저 회수해 새 핀과 겹치지 않게 한다
         RespawnPins(_bl);
-        ResetBallToStart();
         UpdateHud();
     }
 
@@ -1530,6 +1534,9 @@ public partial class SlimeWindow : Window
                     _bl.LaneHalfTop, _bl.LaneHalfBot, _bl.AlleyHalfTop, _bl.AlleyHalfBot,
                     _bl.DeckBotY, _bl.ArrowsY);
 
+        _bowlingScoreboard = new BowlingScoreboardWindow(_monitors.PrimaryWorkingArea);
+        _bowlingScoreboard.Show();
+
         StartNewGame();        // 핀 세우기 + 공 시작점 + HUD
         RaiseMainWindowTop();  // 공 창을 최상단으로(레인·핀 위)
         StartBowlingLoop();
@@ -1559,6 +1566,11 @@ public partial class SlimeWindow : Window
         StopBowlingLoop();
         ClearPins();
         if (_lane != null) { try { _lane.Close(); } catch { } _lane = null; }
+        if (_bowlingScoreboard != null)
+        {
+            try { _bowlingScoreboard.Close(); } catch { }
+            _bowlingScoreboard = null;
+        }
         Topmost = _settings.AlwaysOnTop;
         if (_savedSlimeSize.HasValue)
         {
@@ -1940,57 +1952,255 @@ public partial class SlimeWindow : Window
         }
     }
 
-    /// <summary>공이 끝까지 굴러가 멈춘 뒤 호출 — 점수 집계 + 다음 투구/프레임 준비.</summary>
+    /// <summary>공이 끝까지 굴러가 멈춘 뒤 호출 — 투구 기록, 표준 점수 계산, 다음 투구 준비.</summary>
     private void FinishThrow()
     {
-        int knocked = CountKnockedPins();
-        _totalScore += knocked;
+        int knocked = Math.Clamp(CountKnockedPins(), 0, 10);
+        _frameRolls[_frame - 1].Add(knocked);
 
+        if (_frame < TotalFrames)
+            FinishRegularFrame(knocked);
+        else
+            FinishTenthFrame(knocked);
+
+        RecalculateTotalScore();
+        UpdateHud();
+    }
+
+    private void FinishRegularFrame(int knocked)
+    {
         if (_throwNo == 1)
         {
             if (knocked >= 10)
             {
                 ShowBanner("STRIKE! 🎳", Color.FromRgb(0xFF, 0xD1, 0x3A));
-                NextFrame();
+                AdvanceFrame();
             }
             else
             {
                 if (knocked == 0 && _ballGutterSide != 0)
                     ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
-                RemoveKnockedPins();   // 쓰러진 핀만 치우고 남은 핀은 그대로
+                RemoveKnockedPins();
                 _throwNo = 2;
                 ResetBallToStart();
             }
-        }
-        else
-        {
-            // 2구: 남아 있던 핀을 모두 쓰러뜨렸으면 스페어
-            if (knocked > 0 && knocked == _pins.Count)
-                ShowBanner("SPARE! ✨", Color.FromRgb(0x9B, 0xE8, 0x7A));
-            else if (knocked == 0 && _ballGutterSide != 0)
-                ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
-            NextFrame();
+            return;
         }
 
-        UpdateHud();
+        int framePins = _frameRolls[_frame - 1].Sum();
+        if (framePins >= 10)
+            ShowBanner("SPARE! ✨", Color.FromRgb(0x9B, 0xE8, 0x7A));
+        else if (knocked == 0 && _ballGutterSide != 0)
+            ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
+        AdvanceFrame();
     }
 
-    private void NextFrame()
+    /// <summary>10프레임은 스트라이크/스페어 시 최대 3구까지 진행한다.</summary>
+    private void FinishTenthFrame(int knocked)
+    {
+        List<int> rolls = _frameRolls[TotalFrames - 1];
+        if (_throwNo == 1)
+        {
+            if (knocked >= 10)
+            {
+                ShowBanner("STRIKE! 🎳", Color.FromRgb(0xFF, 0xD1, 0x3A));
+                PrepareFullRackForNextThrow(2);
+            }
+            else
+            {
+                if (knocked == 0 && _ballGutterSide != 0)
+                    ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
+                RemoveKnockedPins();
+                _throwNo = 2;
+                ResetBallToStart();
+            }
+            return;
+        }
+
+        if (_throwNo == 2)
+        {
+            int first = rolls[0];
+            if (first >= 10)
+            {
+                if (knocked >= 10)
+                {
+                    ShowBanner("STRIKE! 🎳", Color.FromRgb(0xFF, 0xD1, 0x3A));
+                    PrepareFullRackForNextThrow(3);
+                }
+                else
+                {
+                    RemoveKnockedPins();
+                    _throwNo = 3;
+                    ResetBallToStart();
+                }
+            }
+            else if (first + knocked >= 10)
+            {
+                ShowBanner("SPARE! ✨", Color.FromRgb(0x9B, 0xE8, 0x7A));
+                PrepareFullRackForNextThrow(3);
+            }
+            else
+            {
+                if (knocked == 0 && _ballGutterSide != 0)
+                    ShowBanner("거터! 😵", Color.FromRgb(0xFF, 0x9B, 0x6A));
+                EndBowlingGame();
+            }
+            return;
+        }
+
+        if (knocked >= 10)
+            ShowBanner("STRIKE! 🎳", Color.FromRgb(0xFF, 0xD1, 0x3A));
+        else if (rolls.Count >= 3 && rolls[0] >= 10 && rolls[1] < 10 && rolls[1] + rolls[2] >= 10)
+            ShowBanner("SPARE! ✨", Color.FromRgb(0x9B, 0xE8, 0x7A));
+        EndBowlingGame();
+    }
+
+    private void AdvanceFrame()
     {
         _frame++;
         _throwNo = 1;
-        if (_frame > TotalFrames)
-        {
-            _frame = TotalFrames;
-            _gameOver = true;
-            ClearPins();
-            ResetBallToStart();
-            return;
-        }
-        RespawnPins(_bl);      // 새 프레임: 10핀 전부 다시
+        ResetBallToStart();    // 공을 먼저 투구 위치로 치운 뒤
+        RespawnPins(_bl);      // 다음 프레임의 10핀을 세운다
+    }
+
+    private void PrepareFullRackForNextThrow(int nextThrow)
+    {
+        _throwNo = nextThrow;
+        ResetBallToStart();    // 보너스 투구도 공을 먼저 회수한 다음
+        RespawnPins(_bl);      // 새 랙을 세워 공과 핀이 겹치지 않게 한다
+    }
+
+    private void EndBowlingGame()
+    {
+        _frame = TotalFrames;
+        _gameOver = true;
+        ClearPins();
         ResetBallToStart();
     }
 
+    private void RecalculateTotalScore()
+    {
+        _totalScore = 0;
+        foreach (int? score in CalculateCumulativeScores())
+            if (score.HasValue) _totalScore = score.Value;
+    }
+
+    private int?[] CalculateCumulativeScores()
+    {
+        var result = new int?[TotalFrames];
+        int running = 0;
+
+        for (int i = 0; i < TotalFrames; i++)
+        {
+            List<int> rolls = _frameRolls[i];
+            if (rolls.Count == 0) break;
+
+            int frameScore;
+            if (i < TotalFrames - 1)
+            {
+                if (rolls[0] >= 10)
+                {
+                    List<int> bonus = FollowingRolls(i, 2);
+                    if (bonus.Count < 2) break;
+                    frameScore = 10 + bonus[0] + bonus[1];
+                }
+                else
+                {
+                    if (rolls.Count < 2) break;
+                    int basePins = rolls[0] + rolls[1];
+                    if (basePins >= 10)
+                    {
+                        List<int> bonus = FollowingRolls(i, 1);
+                        if (bonus.Count < 1) break;
+                        frameScore = 10 + bonus[0];
+                    }
+                    else
+                    {
+                        frameScore = basePins;
+                    }
+                }
+            }
+            else
+            {
+                if (!IsFrameComplete(i)) break;
+                frameScore = rolls.Sum();
+            }
+
+            running += frameScore;
+            result[i] = running;
+        }
+        return result;
+    }
+
+    private List<int> FollowingRolls(int frameIndex, int count)
+    {
+        var result = new List<int>(count);
+        for (int i = frameIndex + 1; i < TotalFrames && result.Count < count; i++)
+        {
+            foreach (int pins in _frameRolls[i])
+            {
+                result.Add(pins);
+                if (result.Count == count) break;
+            }
+        }
+        return result;
+    }
+
+    private bool IsFrameComplete(int frameIndex)
+    {
+        List<int> rolls = _frameRolls[frameIndex];
+        if (rolls.Count == 0) return false;
+        if (frameIndex < TotalFrames - 1)
+            return rolls[0] >= 10 || rolls.Count >= 2;
+        if (rolls.Count < 2) return false;
+        bool bonus = rolls[0] >= 10 || rolls[0] + rolls[1] >= 10;
+        return bonus ? rolls.Count >= 3 : rolls.Count >= 2;
+    }
+
+    private IReadOnlyList<BowlingFrameDisplay> BuildScoreboardFrames()
+    {
+        int?[] cumulative = CalculateCumulativeScores();
+        var display = new List<BowlingFrameDisplay>(TotalFrames);
+        for (int i = 0; i < TotalFrames; i++)
+        {
+            List<int> rolls = _frameRolls[i];
+            string first = "", second = "", third = "";
+
+            if (i < TotalFrames - 1)
+            {
+                if (rolls.Count > 0)
+                {
+                    if (rolls[0] >= 10) second = "X";
+                    else first = PinMark(rolls[0]);
+                }
+                if (rolls.Count > 1)
+                    second = rolls[0] + rolls[1] >= 10 ? "/" : PinMark(rolls[1]);
+            }
+            else
+            {
+                if (rolls.Count > 0) first = PinMark(rolls[0]);
+                if (rolls.Count > 1)
+                {
+                    second = rolls[0] < 10 && rolls[0] + rolls[1] >= 10
+                        ? "/"
+                        : PinMark(rolls[1]);
+                }
+                if (rolls.Count > 2)
+                {
+                    third = rolls[0] >= 10 && rolls[1] < 10 && rolls[1] + rolls[2] >= 10
+                        ? "/"
+                        : PinMark(rolls[2]);
+                }
+            }
+
+            display.Add(new BowlingFrameDisplay(
+                first, second, third, cumulative[i], IsFrameComplete(i)));
+        }
+        return display;
+    }
+
+    private static string PinMark(int pins)
+        => pins >= 10 ? "X" : pins <= 0 ? "–" : pins.ToString();
     private void ShowBanner(string text, Color color)
     {
         _banner = text;
@@ -2002,23 +2212,36 @@ public partial class SlimeWindow : Window
 
     private void UpdateHud()
     {
-        if (_lane == null) return;
+        if (_bowlingScoreboard == null) return;
+
+        string status;
+        Color color;
         if (_gameOver)
         {
-            _lane.SetStatus($"게임 종료! 총 {_totalScore}점 · 우클릭 → 핀 다시 세우기",
-                Color.FromRgb(0xFF, 0xD1, 0x3A));
-            return;
+            status = $"GAME COMPLETE · {_totalScore}점";
+            color = Color.FromRgb(0xFF, 0xD1, 0x3A);
         }
-        if (_banner != null && Now < _bannerUntil)
+        else if (_banner != null && Now < _bannerUntil)
         {
-            _lane.SetStatus(_banner, _bannerColor);
-            return;
+            status = _banner;
+            color = _bannerColor;
         }
-        _banner = null;
-        _lane.SetStatus($"{_frame}F · {_throwNo}구 · {_totalScore}점",
-            Color.FromRgb(0xFF, 0xF4, 0xD6));
-    }
+        else
+        {
+            _banner = null;
+            status = "READY · 공을 굴려주세요";
+            color = Color.FromRgb(0xA9, 0xD9, 0xF7);
+        }
 
+        _bowlingScoreboard.SetGame(
+            _frame,
+            _throwNo,
+            _totalScore,
+            BuildScoreboardFrames(),
+            status,
+            color,
+            _gameOver);
+    }
     private readonly struct BowlingLayout
     {
         public double CenterX { get; init; }
@@ -2242,7 +2465,11 @@ public partial class SlimeWindow : Window
         UpdateBallLane(rBall);
         ApplyWindowPosition();
 
-        UpdateHud();
+        if (_banner != null && now >= _bannerUntil)
+        {
+            _banner = null;
+            UpdateHud();
+        }
 
         bool ballMoving = !_physics.IsAtRest;
         bool pinsMoving = false;
@@ -2267,9 +2494,10 @@ public partial class SlimeWindow : Window
         if (!ballMoving && !pinsMoving && !pending) StopBowlingLoop();
     }
 
-    /// <summary>핀 충돌 반경 — PinSkin 의 실제 최대폭에서 유도.</summary>
+    /// <summary>핀 충돌 반경 — 리디자인 전과 같은 연쇄 충돌 감각을 유지하는 물리 폭.</summary>
     private double PinRadius =>
-        _settings.SlimeSize * PinWindow.BoxFactor * (Skins.PinSkin.PinMaxWidth / Skins.PinSkin.Box) / 2.0;
+        _settings.SlimeSize * PinWindow.BoxFactor
+        * (Skins.PinSkin.CollisionWidth / Skins.PinSkin.Box) / 2.0;
 
     /// <summary>공(무거움)+핀(가벼움) 원-원 충돌. 핀은 맞으면 넘어지고 다른 핀도 쓰러뜨린다(연쇄).</summary>
     private void ResolveBowlingCollisions(double rBall, double rPin)
