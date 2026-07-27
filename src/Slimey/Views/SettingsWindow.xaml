@@ -169,6 +169,15 @@
                                 <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding ShowReleaseNotes}"/>
                             </Grid>
 
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="새 버전 받으면 바로 물어보기" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="끄면 앱을 다시 켤 때 조용히 적용됩니다(그만큼 늦게 반영)." Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding AutoRestartOnUpdate}"/>
+                            </Grid>
+
                             <StackPanel Orientation="Horizontal" Margin="0,18,0,6">
                                 <Button Style="{StaticResource GhostButton}" Content="위치 초기화"
                                         MinWidth="150" Height="40" Padding="26,0" Click="OnResetPosition"/>

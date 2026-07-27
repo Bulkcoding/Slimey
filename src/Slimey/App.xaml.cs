@@ -2,6 +2,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+using MessageBoxButton = System.Windows.MessageBoxButton;
+using MessageBoxImage = System.Windows.MessageBoxImage;
+using MessageBoxResult = System.Windows.MessageBoxResult;
 using Slimey.Models;
 using Slimey.Network;
 using Slimey.Services;
@@ -75,10 +79,48 @@ public partial class App : Application
         // 방금 업데이트가 적용됐다면 변경 내용을 한 번 보여준다.
         ShowReleaseNotesIfJustUpdated();
 
-        // 백그라운드로 최신 릴리스 확인 → 있으면 받아 두고 다음 실행 때 조용히 적용.
+        // 백그라운드로 최신 릴리스 확인 → 받아 두면 그 즉시 적용을 제안한다(아래 핸들러).
+        UpdateService.UpdateStaged += OnUpdateStaged;
         _ = UpdateService.CheckAndStageAsync();
 
         Logger.Info("Slimey started.");
+    }
+
+    /// <summary>
+    /// 새 버전을 받아 둔 직후. 실행 중인 exe 는 스스로를 덮어쓸 수 없어 재시작이 꼭 필요하므로,
+    /// 지금 재시작할지 물어본다. (예전에는 그냥 다음 실행을 기다려서, 사용자가 앱을 두 번
+    /// 켜야 새 버전이 됐다.) 거절하면 다음 실행 때 조용히 적용된다.
+    /// </summary>
+    private void OnUpdateStaged(Version version)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            try
+            {
+                if (_settings is { AutoRestartOnUpdate: false }) return; // 사용자가 꺼 둠
+
+                var prompt = new UpdatePromptWindow(version, _settings);
+                prompt.ShowDialog();
+                if (!prompt.RestartNow) return;
+
+                if (UpdateService.TryApplyStagedUpdate())
+                {
+                    Logger.Info($"Applying staged update v{version} on user request; restarting.");
+                    Shutdown(); // 교체 스크립트가 종료를 기다렸다가 새 버전으로 다시 실행한다
+                }
+                else
+                {
+                    Logger.Error("Staged update could not be applied (write permission?).");
+                    MessageBox.Show(
+                        "업데이트를 적용하지 못했습니다. 설치 위치에 쓰기 권한이 있는지 확인해 주세요.",
+                        "Slimey", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Failed to prompt/apply staged update.", ex);
+            }
+        });
     }
 
     /// <summary>

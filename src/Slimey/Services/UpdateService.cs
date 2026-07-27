@@ -151,9 +151,26 @@ public static class UpdateService
 
             // 릴리스 노트도 같이 저장 — 이미 받아 둔 응답에 들어 있어 추가 요청이 필요 없다.
             SavePendingNotes(root, latest);
+
+            // 받아 둔 즉시 알린다. 예전에는 여기서 끝내고 "다음 실행 때" 교체했기 때문에
+            // 사용자가 앱을 두 번 켜야 새 버전이 됐다. 이제 이 시점에 바로 적용을 제안한다.
+            try { UpdateStaged?.Invoke(latest); }
+            catch (Exception ex) { Logger.Error("UpdateStaged handler threw.", ex); }
         }
         catch { /* 네트워크/권한/파싱 문제는 조용히 무시(앱 사용에 지장 없음) */ }
     }
+
+    /// <summary>
+    /// 새 버전을 받아 둔 직후 발생(백그라운드 스레드). 인자는 받아 둔 버전.
+    /// 구독자는 UI 스레드로 마샬링해야 한다.
+    /// </summary>
+    public static event Action<Version>? UpdateStaged;
+
+    /// <summary>받아 둔 업데이트가 있는가(재시작하면 바로 적용 가능한 상태).</summary>
+    public static bool HasStagedUpdate =>
+        File.Exists(PendingExe) && File.Exists(PendingVer)
+        && Version.TryParse(File.ReadAllText(PendingVer).Trim(), out var v)
+        && Normalize(v) > Current;
 
     /// <summary>
     /// 최신 릴리스의 노트를 즉시 조회한다(설정창의 "최근 변경 내용 보기"용).

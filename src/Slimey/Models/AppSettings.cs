@@ -227,6 +227,13 @@ public sealed class AppSettings : INotifyPropertyChanged
     private bool _showReleaseNotes = true;
     public bool ShowReleaseNotes { get => _showReleaseNotes; set => Set(ref _showReleaseNotes, value); }
 
+    /// <summary>
+    /// 새 버전을 받으면 그 자리에서 "지금 재시작할까요?" 를 물을지.
+    /// 끄면 묻지 않고 다음 실행 때 조용히 적용된다(= 앱을 두 번 켜야 새 버전).
+    /// </summary>
+    private bool _autoRestartOnUpdate = true;
+    public bool AutoRestartOnUpdate { get => _autoRestartOnUpdate; set => Set(ref _autoRestartOnUpdate, value); }
+
     /// <summary>표시할 스킨(젤리/당구공 등).</summary>
     private SlimeSkinKind _skin = SlimeSkinKind.Jelly;
     public SlimeSkinKind Skin { get => _skin; set => Set(ref _skin, value); }
