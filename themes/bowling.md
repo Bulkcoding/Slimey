@@ -6,7 +6,7 @@
 - **브랜치 / 폴더**: `theme/bowling` / `../Slimey-bowling`
 - **enum**: `SlimeSkinKind.Bowling = 6` (예약표 배정 번호)
 - **설정창 표시 이름**: `"볼링공"`
-- **상태**: ✅ 완료 (머지 대기)
+- **상태**: 🔀 머지됨 (`main` 통합 완료)
 
 ---
 

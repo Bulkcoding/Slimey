@@ -6,7 +6,7 @@
 - **브랜치 / 폴더**: `theme/basketball` / `../Slimey-basketball`
 - **enum**: `SlimeSkinKind.Basketball = 5`
 - **설정창 표시 이름**: `"농구공"`
-- **상태**: ✅ 완료
+- **상태**: 🔀 머지됨 (`main` 통합 완료)
 
 ---
 
