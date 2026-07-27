@@ -20,6 +20,8 @@ public static class MsgType
     public const string Presence = "PRESENCE";
     public const string RoomConfig = "ROOM_CONFIG";
     public const string SetOrder = "SET_ORDER";
+    public const string TransferHost = "TRANSFER_HOST";
+    public const string SetTheme = "SET_THEME";
     public const string Handoff = "HANDOFF";
     public const string Ack = "ACK";
     public const string HandoffResult = "HANDOFF_RESULT";
@@ -57,6 +59,8 @@ public sealed class WelcomeData
     [JsonPropertyName("host")] public string? Host { get; set; }
     /// <summary>파티 순서(좌 → 우).</summary>
     [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
+    /// <summary>방 공통 테마(방장 지정). null/빈값 = 각자 설정 유지.</summary>
+    [JsonPropertyName("theme")] public string? Theme { get; set; }
 }
 
 public sealed class NodePresenceDto
@@ -72,12 +76,25 @@ public sealed class PresenceData
     [JsonPropertyName("owner")] public string? Owner { get; set; }
     [JsonPropertyName("host")] public string? Host { get; set; }
     [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
+    [JsonPropertyName("theme")] public string? Theme { get; set; }
 }
 
 /// <summary>파티 순서 변경(방장만).</summary>
 public sealed class SetOrderData
 {
     [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
+}
+
+/// <summary>방장 위임(방장만).</summary>
+public sealed class TransferHostData
+{
+    [JsonPropertyName("to")] public string To { get; set; } = "";
+}
+
+/// <summary>방 공통 테마 지정(방장만).</summary>
+public sealed class SetThemeData
+{
+    [JsonPropertyName("theme")] public string Theme { get; set; } = "";
 }
 
 public sealed class EdgeLinkDto

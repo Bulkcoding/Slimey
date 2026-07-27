@@ -54,6 +54,15 @@ export class RoomDurableObject extends DurableObject<Env> {
   private order: string[] = [];
   /** 빈 방 폐기 예정 시각(epoch ms). null = 폐기 예약 없음(누군가 접속 중). */
   private disposeAt: number | null = null;
+  /**
+   * 방을 처음 만든 노드. 방장이 잠깐 끊겼다 돌아오면 방장을 되돌려주기 위해 기억한다.
+   * (재접속 사이에 자동 승계된 방장을 원래 개설자가 돌아왔을 때 회수)
+   */
+  private creator: string | null = null;
+  /** 방장이 명시적으로 위임됐는가. true 면 개설자가 돌아와도 자동 회수하지 않는다. */
+  private hostExplicit = false;
+  /** 방 공통 테마(방장이 지정). null = 각자 설정 유지. */
+  private theme: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -67,6 +76,9 @@ export class RoomDurableObject extends DurableObject<Env> {
       this.host = (await ctx.storage.get<string | null>("host")) ?? null;
       this.order = (await ctx.storage.get<string[]>("order")) ?? [];
       this.disposeAt = (await ctx.storage.get<number | null>("disposeAt")) ?? null;
+      this.creator = (await ctx.storage.get<string | null>("creator")) ?? null;
+      this.hostExplicit = (await ctx.storage.get<boolean>("hostExplicit")) ?? false;
+      this.theme = (await ctx.storage.get<string | null>("theme")) ?? null;
     });
   }
 
@@ -110,6 +122,10 @@ export class RoomDurableObject extends DurableObject<Env> {
         return this.handleRoomConfig(meta, env as Envelope<{ links: EdgeLink[] }>);
       case "SET_ORDER":
         return this.handleSetOrder(meta, env as Envelope<{ order: string[] }>);
+      case "TRANSFER_HOST":
+        return this.handleTransferHost(meta, env as Envelope<{ to: string }>);
+      case "SET_THEME":
+        return this.handleSetTheme(meta, env as Envelope<{ theme: string }>);
       default:
         return this.sendError(ws, ErrorCodes.BAD_MESSAGE, `unknown type ${env.type}`);
     }
@@ -170,8 +186,21 @@ export class RoomDurableObject extends DurableObject<Env> {
       await this.ctx.storage.put("owner", this.owner);
     }
 
+    // 방 개설자 기록(최초 1회). 방장 자동 승계 후 개설자가 돌아왔을 때 되돌리기 위함.
+    if (this.creator === null) {
+      this.creator = nodeId;
+      await this.ctx.storage.put("creator", this.creator);
+    }
+
     // 방장이 없으면 최초 참여자(= 방을 만든 사람)가 방장.
     if (this.host === null) {
+      this.host = nodeId;
+      await this.ctx.storage.put("host", this.host);
+    }
+    // 개설자가 (재)접속했는데 방장이 자동 승계된 상태면 방장을 되돌린다.
+    // 앱 재시작·네트워크 순단으로 방을 만든 사람이 방장을 잃는 문제를 막는다.
+    // 단, 방장을 명시적으로 위임한 경우(hostExplicit)는 존중해서 회수하지 않는다.
+    else if (!this.hostExplicit && nodeId === this.creator && this.host !== nodeId) {
       this.host = nodeId;
       await this.ctx.storage.put("host", this.host);
     }
@@ -190,7 +219,7 @@ export class RoomDurableObject extends DurableObject<Env> {
       to: nodeId,
       data: {
         nodeId, owner: this.owner, links: this.links, nodes: this.presenceNodes(),
-        host: this.host, order: this.order,
+        host: this.host, order: this.order, theme: this.theme,
       },
     });
     this.broadcastPresence();
@@ -309,6 +338,52 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.broadcastPresence();
   }
 
+  // ── TRANSFER_HOST: 방장 위임(방장만) ─────────────────────────
+  private async handleTransferHost(meta: SocketMeta, env: Envelope<{ to: string }>): Promise<void> {
+    if (this.host !== meta.nodeId) {
+      return this.sendToNode(meta.nodeId, {
+        v: PROTOCOL_VERSION, type: "ERROR",
+        data: { code: ErrorCodes.NOT_HOST, message: "only host can transfer host" },
+      });
+    }
+
+    const to = (env.data?.to ?? "").trim();
+    if (!to || to === meta.nodeId) return;
+
+    // 접속 중인 노드에게만 넘길 수 있다(빈 방장 방지).
+    if (!this.socketOfNode(to)) {
+      return this.sendToNode(meta.nodeId, {
+        v: PROTOCOL_VERSION, type: "ERROR",
+        data: { code: ErrorCodes.TARGET_NOT_FOUND, message: `${to} is not online` },
+      });
+    }
+
+    this.host = to;
+    this.hostExplicit = true; // 명시 위임 → 개설자가 돌아와도 자동 회수하지 않음
+    await this.ctx.storage.put("host", this.host);
+    await this.ctx.storage.put("hostExplicit", true);
+    this.broadcastPresence();
+  }
+
+  // ── SET_THEME: 방 공통 테마(방장만) ──────────────────────────
+  private async handleSetTheme(meta: SocketMeta, env: Envelope<{ theme: string }>): Promise<void> {
+    if (this.host !== meta.nodeId) {
+      return this.sendToNode(meta.nodeId, {
+        v: PROTOCOL_VERSION, type: "ERROR",
+        data: { code: ErrorCodes.NOT_HOST, message: "only host can set room theme" },
+      });
+    }
+
+    const theme = (env.data?.theme ?? "").trim();
+    if (!theme) return;
+
+    this.theme = theme;
+    await this.ctx.storage.put("theme", this.theme);
+    // 방 전원에게 즉시 반영시킨다.
+    this.broadcast({ v: PROTOCOL_VERSION, type: "SET_THEME", data: { theme } });
+    this.broadcastPresence();
+  }
+
   // ── 알람: 핸드오프 ACK 타임아웃 + 빈 방 폐기 ────────────────
   async alarm(): Promise<void> {
     const now = Date.now();
@@ -389,6 +464,9 @@ export class RoomDurableObject extends DurableObject<Env> {
     this.order = [];
     this.disposeAt = null;
     this.seq = 0;
+    this.creator = null;
+    this.hostExplicit = false;
+    this.theme = null;
   }
 
   /**
@@ -439,7 +517,10 @@ export class RoomDurableObject extends DurableObject<Env> {
   private broadcastPresence(): void {
     this.broadcast({
       v: PROTOCOL_VERSION, type: "PRESENCE",
-      data: { nodes: this.presenceNodes(), owner: this.owner, host: this.host, order: this.order },
+      data: {
+        nodes: this.presenceNodes(), owner: this.owner,
+        host: this.host, order: this.order, theme: this.theme,
+      },
     });
   }
 

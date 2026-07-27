@@ -127,9 +127,18 @@ public partial class ParticleOverlayWindow : Window
     /// 파티클이 있을 때만 무리 중심으로 Left/Top 을 '이동'(저비용)시킨다.
     /// 좌표는 현재 창 좌상단(_originPx*) 기준 로컬 DIP.
     /// </summary>
+    /// <summary>직전 프레임에 보이던 파티클 수. 0 → 0 이면 할 일이 없어 통째로 건너뛴다.</summary>
+    private int _lastRendered;
+
     public void Render(IReadOnlyList<Particle> particles)
     {
         int n = particles.Count;
+
+        // 파티클이 없고 이미 다 지워 뒀으면 아무것도 하지 않는다.
+        // (렌더 루프는 공이 움직이는 내내 돌기 때문에, 이 조기 반환이 프레임당 수십 번의
+        //  의존 속성 쓰기를 없애 준다 — 고속에서 렉의 큰 원인이었다.)
+        if (n == 0 && _lastRendered == 0) return;
+        _lastRendered = n;
 
         if (n > 0)
         {

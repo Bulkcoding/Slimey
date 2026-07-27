@@ -400,6 +400,16 @@
                                         Click="OnJoinRoom"/>
                             </StackPanel>
 
+                            <!-- ── 방 공통 테마 (방장만) ── -->
+                            <StackPanel x:Name="RoomThemePanel" Visibility="Collapsed">
+                                <TextBlock Text="방 공통 테마" Style="{StaticResource Section}"/>
+                                <TextBlock Text="방장이 고르면 방에 있는 모든 PC의 테마가 함께 바뀝니다."
+                                           Style="{StaticResource RowDesc}"/>
+                                <ComboBox x:Name="RoomThemeCombo" Style="{StaticResource DarkCombo}"
+                                          Margin="0,8,0,0" Width="200" HorizontalAlignment="Left"
+                                          SelectionChanged="OnRoomThemeChanged"/>
+                            </StackPanel>
+
                             <!-- ── 파티원 (좌 → 우 배치) ── -->
                             <TextBlock Text="파티원 (왼쪽 → 오른쪽 배치 순서)" Style="{StaticResource Section}"/>
                             <TextBlock x:Name="PartyHint" Style="{StaticResource RowDesc}"

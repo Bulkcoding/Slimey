@@ -145,9 +145,15 @@ public partial class HitTextOverlayWindow : Window
     private static System.Windows.Media.Brush Freeze(Color c) { var b = new SolidColorBrush(c); b.Freeze(); return b; }
 
     /// <summary>렌더 루프에서 매 프레임 호출. 문구 무리 중심으로 창 이동 + 풀 갱신.</summary>
+    /// <summary>직전 프레임에 그린 문구 수. 0 → 0 이면 건너뛴다(고속 이동 중 프레임 비용 절감).</summary>
+    private int _lastRendered;
+
     public void Render(IReadOnlyList<HitText> items)
     {
         int n = items.Count;
+        if (n == 0 && _lastRendered == 0) return;
+        _lastRendered = n;
+
         if (n > 0)
         {
             // 창은 고정 크기를 유지하고(리사이즈는 레이어드 창에서 동기 스톨) 이동만 한다.

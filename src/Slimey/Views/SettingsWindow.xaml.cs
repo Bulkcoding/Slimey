@@ -602,96 +602,192 @@ public partial class SettingsWindow : Window
         bool host = _slime.IsHost;
         NetLeaveBtn.Visibility = _slime.RelayAuth.Enabled ? Visibility.Visible : Visibility.Collapsed;
 
+        // 방 공통 테마는 방장에게만 노출.
+        RoomThemePanel.Visibility = host && shown.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (RoomThemePanel.Visibility == Visibility.Visible) SyncRoomThemeCombo();
+
         PartyHint.Text = shown.Count == 0
             ? "방에 입장하면 참여자가 표시됩니다."
             : host
-                ? "드래그해서 순서를 바꾸세요. 왼쪽이 화면 왼쪽입니다. (방장 권한)"
+                ? "카드를 드래그해 순서를 바꾸세요. 왼쪽이 실제 화면 왼쪽입니다. (우클릭 → 방장 위임)"
                 : "배치는 방장이 정합니다.";
 
-        var panel = new StackPanel();
+        // 배치를 화면처럼 보이게: 카드(모니터) 를 좌 → 우 로 늘어놓고 사이를 선으로 잇는다.
+        var chain = new StackPanel { Orientation = Orientation.Horizontal };
         for (int i = 0; i < shown.Count; i++)
-            panel.Children.Add(BuildPartyRow(shown[i], i, host));
+        {
+            if (i > 0) chain.Children.Add(BuildConnector());
+            chain.Children.Add(BuildPartyCard(shown[i], i, host));
+        }
+
+        var scroll = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = chain,
+        };
+
         PartyList.Items.Clear();
-        PartyList.Items.Add(panel);
+        PartyList.Items.Add(scroll);
 
         PartyChainInfo.Text = shown.Count > 1
-            ? "배치: " + string.Join("  |  ", shown)
+            ? "공이 카드 오른쪽 끝을 넘으면 다음 카드의 왼쪽에서 나옵니다. 양 끝은 벽에 튕깁니다."
             : shown.Count == 1 ? "혼자 있는 방입니다. 다른 PC가 입장하면 좌우로 이어집니다." : "";
     }
 
-    private Border BuildPartyRow(string nodeId, int index, bool hostCanDrag)
+    // ── 방 공통 테마(방장) ──────────────────────────────────
+    private bool _syncingRoomTheme;
+
+    private void SyncRoomThemeCombo()
+    {
+        if (RoomThemeCombo.Items.Count == 0)
+        {
+            foreach (var (kind, name) in Skins)
+                RoomThemeCombo.Items.Add(new ComboBoxItem { Content = name, Tag = kind });
+        }
+
+        _syncingRoomTheme = true;
+        foreach (ComboBoxItem it in RoomThemeCombo.Items)
+        {
+            if (it.Tag is SlimeSkinKind k && k == _settings.Skin) { RoomThemeCombo.SelectedItem = it; break; }
+        }
+        _syncingRoomTheme = false;
+    }
+
+    private void OnRoomThemeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingRoomTheme) return;
+        if (RoomThemeCombo.SelectedItem is not ComboBoxItem { Tag: SlimeSkinKind kind }) return;
+        _settings.Skin = kind;        // 내 테마 먼저 적용
+        _slime.PushRoomTheme(kind);   // 방 전체에 배포(방장만 유효)
+    }
+
+    /// <summary>카드 사이를 잇는 연결선(공이 지나가는 통로).</summary>
+    private UIElement BuildConnector()
+    {
+        var panel = new StackPanel
+        {
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(2, 0, 2, 0),
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "↔",
+            Foreground = (Brush)FindResource("Accent"),
+            FontSize = 15,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        panel.Children.Add(new Border
+        {
+            Height = 2, Width = 26,
+            Background = (Brush)FindResource("Accent"),
+            Opacity = 0.55,
+            CornerRadius = new CornerRadius(1),
+        });
+        return panel;
+    }
+
+    /// <summary>파티원 한 명 = 모니터 한 대를 나타내는 카드.</summary>
+    private Border BuildPartyCard(string nodeId, int index, bool hostCanDrag)
     {
         bool isSelf = nodeId == _slime.SelfNodeId;
         bool isHost = nodeId == _slime.RoomHost;
         bool hasBall = _slime.RoomNodes.FirstOrDefault(n => n.NodeId == nodeId)?.HasBall == true;
 
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var stack = new StackPanel { Margin = new Thickness(10, 8, 10, 8) };
 
-        var pos = new TextBlock
+        // 상단 배지 줄: 순번 · 방장 · 공
+        var badges = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+        badges.Children.Add(new TextBlock
         {
-            Text = (index + 1).ToString(),
+            Text = $"{index + 1}",
             Foreground = (Brush)FindResource("MutedBrush"),
+            FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 12,
-        };
-        Grid.SetColumn(pos, 0);
+        });
+        if (isHost) badges.Children.Add(Badge("방장", (Brush)FindResource("Accent")));
+        if (hasBall) badges.Children.Add(Badge("● 공", (Brush)FindResource("TextBrush")));
+        stack.Children.Add(badges);
 
-        var name = new TextBlock
+        // 화면 모양(모니터) — 공이 있으면 안에 점을 찍는다.
+        var screen = new Border
+        {
+            Width = 92, Height = 54,
+            CornerRadius = new CornerRadius(6),
+            Background = (Brush)FindResource("WinBg"),
+            BorderBrush = (Brush)FindResource(isSelf ? "Accent" : "DarkSeparator"),
+            BorderThickness = new Thickness(isSelf ? 2 : 1),
+        };
+        if (hasBall)
+        {
+            screen.Child = new System.Windows.Shapes.Ellipse
+            {
+                Width = 16, Height = 16,
+                Fill = (Brush)FindResource("Accent"),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+        }
+        stack.Children.Add(screen);
+
+        stack.Children.Add(new TextBlock
         {
             Text = nodeId + (isSelf ? " (나)" : ""),
             Foreground = (Brush)FindResource("TextBrush"),
-            VerticalAlignment = VerticalAlignment.Center,
             FontWeight = isSelf ? FontWeights.SemiBold : FontWeights.Normal,
-        };
-        Grid.SetColumn(name, 1);
+            FontSize = 12,
+            MaxWidth = 96,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 6, 0, 0),
+        });
 
-        var tags = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        if (isHost) tags.Children.Add(Tag("방장", (Brush)FindResource("Accent")));
-        if (hasBall) tags.Children.Add(Tag("공", (Brush)FindResource("MutedBrush")));
-        if (hostCanDrag) tags.Children.Add(Tag("⠿", (Brush)FindResource("MutedBrush")));
-        Grid.SetColumn(tags, 2);
-
-        grid.Children.Add(pos);
-        grid.Children.Add(name);
-        grid.Children.Add(tags);
-
-        var row = new Border
+        var card = new Border
         {
-            CornerRadius = new CornerRadius(8),
+            CornerRadius = new CornerRadius(10),
             Background = (Brush)FindResource("CardBg"),
-            Padding = new Thickness(12, 10, 12, 10),
-            Margin = new Thickness(0, 0, 0, 6),
-            Child = grid,
+            Child = stack,
             Tag = nodeId,
             AllowDrop = hostCanDrag,
-            Cursor = hostCanDrag ? System.Windows.Input.Cursors.SizeAll : null,
+            Cursor = hostCanDrag ? Cursors.SizeAll : null,
         };
+
+        // 우클릭 → 방장 위임(방장만, 자기 자신 제외)
+        if (_slime.IsHost && !isSelf)
+        {
+            var menu = new ContextMenu { Style = TryFindResource("DarkMenu") as Style };
+            var item = new MenuItem
+            {
+                Header = $"{nodeId} 에게 방장 위임",
+                Style = TryFindResource("DarkMenuItem") as Style,
+            };
+            item.Click += (_, _) => _slime.TransferHost(nodeId);
+            menu.Items.Add(item);
+            card.ContextMenu = menu;
+        }
 
         if (hostCanDrag)
         {
-            row.PreviewMouseLeftButtonDown += (s, _) =>
+            card.PreviewMouseLeftButtonDown += (s, _) =>
             {
                 if (s is Border b && b.Tag is string id)
                     DragDrop.DoDragDrop(b, id, DragDropEffects.Move);
             };
-            row.Drop += OnPartyRowDrop;
-            row.DragOver += (_, ev) =>
+            card.Drop += OnPartyRowDrop;
+            card.DragOver += (_, ev) =>
             {
                 ev.Effects = ev.Data.GetDataPresent(DataFormats.StringFormat) ? DragDropEffects.Move : DragDropEffects.None;
                 ev.Handled = true;
             };
         }
-        return row;
+        return card;
 
-        TextBlock Tag(string text, Brush brush) => new()
+        TextBlock Badge(string text, Brush brush) => new()
         {
             Text = text,
             Foreground = brush,
             FontSize = 11,
-            Margin = new Thickness(8, 0, 0, 0),
+            Margin = new Thickness(6, 0, 0, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
     }

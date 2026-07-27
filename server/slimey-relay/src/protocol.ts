@@ -12,6 +12,8 @@ export type MessageType =
   | "PRESENCE"       // server → 방 전체 : 온라인 노드 목록 + owner
   | "ROOM_CONFIG"    // client → server(설정) / server → 방 전체(배포) : 엣지 매핑
   | "SET_ORDER"      // host → server : 파티 순서(좌→우 배치) 변경. 방장만 허용
+  | "TRANSFER_HOST"  // host → server : 방장 위임(대상 노드로). 방장만 허용
+  | "SET_THEME"      // host → server : 방 공통 테마 지정. 방장만 허용
   | "HANDOFF"        // owner → server → target : 공 넘김
   | "ACK"            // target → server : 공 수락
   | "HANDOFF_RESULT" // server → origin : 최종 결과(accepted → 해제 / 거부 → 반사)
@@ -43,11 +45,22 @@ export interface WelcomeData {
   nodes: NodePresence[];   // 현재 온라인 노드
   host: string | null;     // 방장(방을 처음 만든 노드). 배치 결정 권한
   order: string[];         // 파티 순서(좌 → 우). 방장이 정한다
+  theme: string | null;    // 방 공통 테마(방장이 지정). null = 각자 설정 유지
 }
 
 /** 파티 순서 변경(방장만). */
 export interface SetOrderData {
   order: string[];         // 좌 → 우 순서의 nodeId 목록
+}
+
+/** 방장 위임(방장만). */
+export interface TransferHostData {
+  to: string;              // 새 방장이 될 nodeId(접속 중이어야 함)
+}
+
+/** 방 공통 테마 지정(방장만). */
+export interface SetThemeData {
+  theme: string;           // AppSettings.Skin 이름(Jelly/Billiard/Pokeball/...)
 }
 
 export interface NodePresence {
@@ -61,6 +74,7 @@ export interface PresenceData {
   owner: string | null;
   host: string | null;     // 현재 방장(이탈 시 다음 노드로 승계)
   order: string[];         // 파티 순서(좌 → 우)
+  theme: string | null;    // 방 공통 테마
 }
 
 export type Edge = "Left" | "Right" | "Top" | "Bottom";
@@ -114,6 +128,7 @@ export const ErrorCodes = {
   ROOM_FULL: "ROOM_FULL",
   NOT_OWNER: "NOT_OWNER",
   NOT_HOST: "NOT_HOST",
+  TARGET_NOT_FOUND: "TARGET_NOT_FOUND",
   TARGET_OFFLINE: "TARGET_OFFLINE",
   VERSION_MISMATCH: "VERSION_MISMATCH",
 } as const;

@@ -327,6 +327,7 @@ public partial class SlimeWindow : Window
         _dpiScaleX = newDpi.DpiScaleX > 0 ? newDpi.DpiScaleX : 1.0;
         _dpiScaleY = newDpi.DpiScaleY > 0 ? newDpi.DpiScaleY : 1.0;
         ApplyWindowSize();
+        InvalidateWindowPositionCache(); // WPF 가 창을 옮겼을 수 있으니 캐시 무효화
         ApplyWindowPosition();
     }
 
@@ -376,13 +377,41 @@ public partial class SlimeWindow : Window
         if (basketball && _animation != null) EnsureRendering();
     }
 
+    // 창 이동은 매 프레임 일어나는 가장 비싼 작업이다. AllowsTransparency(레이어드) 창에서
+    // WPF Left/Top 세터는 의존 속성 변경 → 레이아웃 → 재합성을 타서, 공이 빠를수록 눈에 띄게 렉이 걸린다.
+    // 같은 이동을 Win32 SetWindowPos 로 직접 하면 그 경로를 통째로 건너뛴다.
+    private const uint SWP_NOSIZE = 0x0001, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+                                            int X, int Y, int cx, int cy, uint uFlags);
+
+    private int _lastPosX = int.MinValue, _lastPosY = int.MinValue;
+
     private void ApplyWindowPosition()
     {
         // 물리 위치(슬라임 top-left)에서 패딩만큼 빼서 창 배치 → 슬라임은 화면상 Position 에 위치.
         double pad = EffectPadPx;
-        Left = (_physics.Position.X - pad) / _dpiScaleX;
-        Top = (_physics.Position.Y - pad) / _dpiScaleY;
+        double px = _physics.Position.X - pad;
+        double py = _physics.Position.Y - pad;
+
+        if (_hwnd != IntPtr.Zero)
+        {
+            // 물리 좌표가 이미 물리 픽셀이므로 DPI 변환 없이 그대로 쓴다(경계에서 더 정확).
+            int x = (int)Math.Round(px), y = (int)Math.Round(py);
+            if (x == _lastPosX && y == _lastPosY) return; // 같은 자리면 건너뜀
+            _lastPosX = x; _lastPosY = y;
+            SetWindowPos(_hwnd, IntPtr.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            return;
+        }
+
+        // 핸들이 아직 없을 때(초기화 중) 폴백.
+        Left = px / _dpiScaleX;
+        Top = py / _dpiScaleY;
     }
+
+    /// <summary>DPI·크기 변경 등으로 WPF 가 창을 다시 배치한 뒤, 다음 프레임에 강제로 재적용시킨다.</summary>
+    private void InvalidateWindowPositionCache() => _lastPosX = _lastPosY = int.MinValue;
 
     /// <summary>스핀 이펙트 요소를 코드로 구성(불규칙 반짝이만; 좌우 블러 없음).</summary>
     private void BuildSpinFx()
@@ -1588,12 +1617,48 @@ public partial class SlimeWindow : Window
         PushRoomConfig(PartyLayout.BuildChainLinks(order));
     }
 
+    /// <summary>방장 위임(방장만). 대상은 접속 중이어야 한다.</summary>
+    public void TransferHost(string toNodeId)
+    {
+        if (_relay == null || !IsHost || string.IsNullOrWhiteSpace(toNodeId)) return;
+        if (toNodeId == _selfNodeId) return;
+
+        _ = _relay.SendAsync(new Envelope
+        {
+            Type = MsgType.TransferHost,
+            From = _selfNodeId,
+            Data = RelayJson.ToElement(new TransferHostData { To = toNodeId }),
+        });
+    }
+
+    /// <summary>방 공통 테마 지정(방장만). 방 전원의 테마가 함께 바뀐다.</summary>
+    public void PushRoomTheme(SlimeSkinKind skin)
+    {
+        if (_relay == null || !IsHost) return;
+        _ = _relay.SendAsync(new Envelope
+        {
+            Type = MsgType.SetTheme,
+            From = _selfNodeId,
+            Data = RelayJson.ToElement(new SetThemeData { Theme = skin.ToString() }),
+        });
+    }
+
+    /// <summary>서버가 알려준 방 공통 테마를 이 PC에 적용.</summary>
+    private void ApplyRoomTheme(string? theme)
+    {
+        if (string.IsNullOrWhiteSpace(theme)) return;
+        if (!Enum.TryParse<SlimeSkinKind>(theme, ignoreCase: true, out var skin)) return;
+        if (_settings.Skin == skin) return;
+        _settings.Skin = skin; // PropertyChanged → ApplySkin
+    }
+
     /// <summary>서버가 알려준 방 상태를 반영. 방장이면 순서에 맞는 배치를 자동으로 맞춘다.</summary>
-    private void ApplyRoomState(string? host, List<string> order, List<NodePresenceDto> nodes)
+    private void ApplyRoomState(string? host, List<string> order, List<NodePresenceDto> nodes, string? theme = null)
     {
         RoomHost = host;
         if (order.Count > 0) _roomOrder = order;
         _roomNodes = nodes;
+        ApplyRoomTheme(theme);
 
         // 방장은 "순서 = 배치"를 보장한다. 새 멤버가 들어와 순서가 늘어나면 링크도 따라 갱신.
         if (IsHost && _roomOrder.Count > 1)
@@ -1635,7 +1700,32 @@ public partial class SlimeWindow : Window
         _networked = false;
         _connected = false;
         _physics.Area = _monitors;
-        if (!_ownsBall) { _ownsBall = true; if (_settings.SlimeVisible) Show(); EnsureRendering(); }
+
+        // 방을 나갔으니 파티 정보(멤버·순서·방장)를 비운다. 안 그러면 설정창 목록에
+        // 나간 사람들이 그대로 남는다.
+        RoomHost = null;
+        _roomOrder = new List<string>();
+        _roomNodes = new List<NodePresenceDto>();
+        RoomStateChanged?.Invoke();
+
+        // 공을 되찾는다. 이때 위치 검증이 중요하다 — 공을 남에게 넘긴 직후라면 위치가
+        // 경계 밖(넘어가던 좌표)이라, 그냥 표시하면 화면 밖에 있어 안 보이고 물리도 정지해
+        // 앱을 껐다 켜야 했다.
+        if (!_ownsBall)
+        {
+            _ownsBall = true;
+            if (!_physics.IsCurrentPositionValid()) ResetPositionToCenter();
+            if (_settings.SlimeVisible) Show();
+            ApplyWindowPosition();
+            EnsureRendering();
+        }
+        else if (!_physics.IsCurrentPositionValid())
+        {
+            // 소유 중이었더라도 경계 밖이면(연결 엣지로 나가던 중 끊김) 되돌린다.
+            ResetPositionToCenter();
+            ApplyWindowPosition();
+            EnsureRendering();
+        }
     }
 
     /// <summary>설정창이 <see cref="RelayAuth"/> 값을 바꾼 뒤 호출. 저장 후 네트워킹 재초기화.</summary>
@@ -1695,7 +1785,9 @@ public partial class SlimeWindow : Window
         _connected = st == RelayState.Connected;
         // 서버가 끊기면(장애/오프라인) 이 PC가 공을 로컬로 표시해 토이를 계속 쓸 수 있게 한다.
         // 재연결 시 WELCOME/PRESENCE 로 소유권이 다시 동기화된다.
-        if (!_connected && !_ownsBall) GainBall(spawnAtCenter: false);
+        // 넘기던 중이었으면 위치가 경계 밖이라 화면 밖에 놓이므로 중앙으로 되돌린다.
+        if (!_connected && !_ownsBall)
+            GainBall(spawnAtCenter: !_physics.IsCurrentPositionValid());
     }
 
     private void OnRelayMessage(Envelope env)
@@ -1717,7 +1809,7 @@ public partial class SlimeWindow : Window
                     {
                         MergeLinksOnJoin(w.Links);
                     }
-                    ApplyRoomState(w.Host, w.Order, w.Nodes);
+                    ApplyRoomState(w.Host, w.Order, w.Nodes, w.Theme);
                     ApplyOwnership(w.Owner);
                 }
                 break;
@@ -1725,9 +1817,14 @@ public partial class SlimeWindow : Window
             case MsgType.Presence:
                 if (env.DataAs<PresenceData>() is { } p)
                 {
-                    ApplyRoomState(p.Host, p.Order, p.Nodes);
+                    ApplyRoomState(p.Host, p.Order, p.Nodes, p.Theme);
                     ApplyOwnership(p.Owner);
                 }
+                break;
+
+            case MsgType.SetTheme:
+                // 방장이 방 테마를 바꿈 → 전원 즉시 반영.
+                if (env.DataAs<SetThemeData>() is { } th) ApplyRoomTheme(th.Theme);
                 break;
 
             case MsgType.RoomConfig:
