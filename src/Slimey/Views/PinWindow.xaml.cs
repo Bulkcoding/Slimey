@@ -39,6 +39,9 @@ public partial class PinWindow : Window
     /// </summary>
     public const double BoxFactor = 10.0 / 3.0;
 
+    /// <summary>원근 레인에서 핀이 공보다 과하게 커 보이지 않도록 적용하는 표시 배율.</summary>
+    public const double VisualScale = 0.72;
+
     public PinWindow(AppSettings settings, MonitorLayoutService monitors, Vector2 startCenter)
     {
         _settings = settings;
@@ -63,7 +66,11 @@ public partial class PinWindow : Window
         double box = _settings.SlimeSize * BoxFactor;
         Width = box / sx;
         Height = box / sy;
-        if (Host != null) { Host.Width = box / sx; Host.Height = box / sy; }
+        if (Host != null)
+        {
+            Host.Width = box * VisualScale / sx;
+            Host.Height = box * VisualScale / sy;
+        }
     }
 
     protected override void OnSourceInitialized(EventArgs e)
