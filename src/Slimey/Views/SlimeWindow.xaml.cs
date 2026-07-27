@@ -1240,7 +1240,7 @@ public partial class SlimeWindow : Window
     private readonly List<HoopWindow> _hoops = new();
     private ScoreboardWindow? _boardLeft, _boardRight;   // 각 모니터 최상단 점수판
     private int _scoreLeft, _scoreRight;                 // 좌/우 모니터 점수판의 값
-    private double _prevBallCenterY;
+    private Vector2 _prevBallCenter;
     private bool _hasPrevBallY;
 
     private void OnToggleHoops(object sender, RoutedEventArgs e)
@@ -1416,11 +1416,20 @@ public partial class SlimeWindow : Window
 
         if (_hasPrevBallY)
         {
+            double dy = center.Y - _prevBallCenter.Y;
             foreach (var h in _hoops)
             {
-                bool crossedDown = _prevBallCenterY <= h.RimCenter.Y && center.Y >= h.RimCenter.Y;
-                bool withinRim = Math.Abs(center.X - h.RimCenter.X) <= h.RimHalfWidth;
-                if (crossedDown && withinRim && vel.Y > 0 && now >= h.ScoreCooldownUntil)
+                // 위→아래 통과. dy > 0 자체가 하강이므로 속도(vel.Y)는 보지 않는다.
+                // 림을 스치며 들어간 공은 통과 프레임에서 vel.Y 가 위로 뒤집혀 골이 취소되곤 했다.
+                bool crossedDown = dy > 1e-9
+                                && _prevBallCenter.Y <= h.RimCenter.Y && center.Y >= h.RimCenter.Y;
+                if (!crossedDown || now < h.ScoreCooldownUntil) continue;
+
+                // 림 높이를 지나는 "순간"의 X 로 판정한다. 프레임 끝 X 로 재면
+                // 비스듬히 들어온 공이 이미 개구부를 지나쳐 있어 골이 누락됐다.
+                double t = (h.RimCenter.Y - _prevBallCenter.Y) / dy;
+                double crossX = _prevBallCenter.X + (center.X - _prevBallCenter.X) * t;
+                if (Math.Abs(crossX - h.RimCenter.X) <= h.RimHalfWidth)
                 {
                     h.OnScored(vel);
                     h.ScoreCooldownUntil = now + 0.6;
@@ -1434,7 +1443,7 @@ public partial class SlimeWindow : Window
             }
         }
 
-        _prevBallCenterY = center.Y;
+        _prevBallCenter = center;
         _hasPrevBallY = true;
     }
 
