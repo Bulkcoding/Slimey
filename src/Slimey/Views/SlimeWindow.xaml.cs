@@ -269,11 +269,22 @@ public partial class SlimeWindow : Window
         if (show && _ownsBall) Show();
         else if (!show) Hide();
 
-        // 당구 3/4구와 이펙트 오버레이도 함께 — 슬라임만 사라지면 숨긴 티가 남는다.
-        foreach (var b in _extraBalls)
+        // 테마가 띄운 것은 전부 함께 감춘다(규칙 §3.6) — 슬라임만 사라지면 숨긴 티가 남는다.
+        // Close() 가 아니라 Hide() 로만 감춰서, 다시 보이기 하면 직전 상태 그대로 복원된다.
+        foreach (var b in _extraBalls)                       // 당구 3/4구
         {
             try { if (show) b.Show(); else b.Hide(); } catch { }
         }
+        foreach (var h in _hoops)                            // 농구골대·백보드·그물
+        {
+            try { if (show) h.Show(); else h.Hide(); } catch { }
+        }
+        foreach (var p in _pins)                             // 볼링핀(쓰러진 상태 유지)
+        {
+            try { if (show) p.Show(); else p.Hide(); } catch { }
+        }
+        try { if (show) _lane?.Show(); else _lane?.Hide(); } catch { } // 레인·거터·점수판
+
         if (show) { _overlay?.Show(); _hitTextOverlay?.Show(); }
         else { _overlay?.Hide(); _hitTextOverlay?.Hide(); }
 
