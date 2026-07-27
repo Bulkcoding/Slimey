@@ -19,6 +19,13 @@ public sealed class NetworkedWalkableArea : IWalkableArea
     /// <summary>이 노드에서 나갈 수 있는(연결된) 바깥 경계 방향.</summary>
     public HashSet<Edge> LinkedExitEdges { get; } = new();
 
+    /// <summary>
+    /// 통과 허용을 적용하지 않은 <b>엄격한</b> 로컬 판정(모니터 작업영역 union).
+    /// 공을 새로 놓을 위치(핸드오프 진입 지점)는 반드시 이쪽으로 검증해야 한다 —
+    /// 통과 허용 판정으로 검사하면 작업표시줄/화면 밖에 공을 놓고 갇히게 된다.
+    /// </summary>
+    public IWalkableArea Strict => _inner;
+
     public NetworkedWalkableArea(IWalkableArea inner) => _inner = inner;
 
     public Rect VirtualBounds => _inner.VirtualBounds;

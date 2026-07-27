@@ -138,8 +138,29 @@ public sealed class BallHandoffCoordinator
             flip = false;
         }
 
-        HandoffMath.IncomingState s = HandoffMath.Unpack(d, entry, flip, _bounds(), _settings.SlimeSize);
-        _physics.Position = s.Position;
+        Bounds bounds = _bounds();
+        double size = _settings.SlimeSize;
+        HandoffMath.IncomingState s = HandoffMath.Unpack(d, entry, flip, bounds, size);
+
+        // 진입 지점이 실제로 공을 놓을 수 있는 곳인지 검증한다. 통과 허용 판정(_area)이 아니라
+        // 엄격 판정(Strict)으로 확인해야 작업표시줄·모니터 사이 빈 공간에 공을 놓고 갇히지 않는다.
+        if (!HandoffMath.TryFindValidEntry(
+                s.Position, entry, bounds, size,
+                (x, y, sz) => _area.Strict.IsRectValid(new System.Windows.Rect(x, y, sz, sz)),
+                out Vector2 spawn))
+        {
+            // 놓을 자리가 전혀 없음(받는 쪽 화면 구성이 이상) → 거부해서 보낸 쪽이 반사하게 한다.
+            _send(new Envelope
+            {
+                Type = MsgType.Ack,
+                From = SelfNodeId,
+                To = env.From,
+                Data = RelayJson.ToElement(new AckData { HandoffId = d.HandoffId, Accepted = false }),
+            });
+            return false;
+        }
+
+        _physics.Position = spawn;
         _physics.Velocity = s.Velocity;
         _physics.AngularVelocity = s.AngularVelocity;
         _physics.SurfaceSpin = s.SurfaceSpin;

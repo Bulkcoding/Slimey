@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -20,6 +20,9 @@ using Image = System.Windows.Controls.Image;
 using MessageBox = System.Windows.MessageBox;
 using Cursors = System.Windows.Input.Cursors;
 using HorizontalAlignment = System.Windows.HorizontalAlignment;
+using DragDropEffects = System.Windows.DragDropEffects;
+using DataFormats = System.Windows.DataFormats;
+using DragDrop = System.Windows.DragDrop;
 using VerticalAlignment = System.Windows.VerticalAlignment;
 using UserControl = System.Windows.Controls.UserControl;
 using TextBox = System.Windows.Controls.TextBox;
@@ -56,10 +59,15 @@ public partial class SettingsWindow : Window
         PreviewMouseDown += OnPreviewMouseDownCapture;
 
         _slime.RelayStateChanged += st => Dispatcher.Invoke(() => UpdateNetStatus(st));
-        BuildLinkRows();
+        // 방 멤버·순서·방장이 바뀌면 파티 목록을 다시 그린다.
+        _slime.RoomStateChanged += OnRoomStateChanged;
         RefreshNetworkPanel();
 
-        Closed += (_, _) => _settings.PropertyChanged -= OnSettingsPropertyChanged;
+        Closed += (_, _) =>
+        {
+            _settings.PropertyChanged -= OnSettingsPropertyChanged;
+            _slime.RoomStateChanged -= OnRoomStateChanged;
+        };
     }
 
     private void OnSettingsPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -459,127 +467,225 @@ public partial class SettingsWindow : Window
     };
 
     // ── 멀티 PC(릴레이) 설정 ────────────────────────────────
-    private sealed class LinkRowUi
-    {
-        public Edge SelfEdge;
-        public TextBox Target = null!;
-        public ComboBox TargetEdge = null!;
-        public CheckBox Flip = null!;
-    }
-
-    private readonly List<LinkRowUi> _linkRowsUi = new();
-
-    private static readonly (Edge edge, string label)[] SelfEdges =
-    {
-        (Edge.Left, "왼쪽"), (Edge.Right, "오른쪽"), (Edge.Top, "위"), (Edge.Bottom, "아래"),
-    };
-    private static readonly (Edge edge, string label)[] AllEdges =
-    {
-        (Edge.Left, "왼쪽"), (Edge.Right, "오른쪽"), (Edge.Top, "위"), (Edge.Bottom, "아래"),
-    };
-
-    private void BuildLinkRows()
-    {
-        LinkRows.Children.Clear();
-        _linkRowsUi.Clear();
-        foreach (var (edge, label) in SelfEdges)
-        {
-            var grid = new Grid { Margin = new Thickness(0, 0, 0, 8) };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(56) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(78) });
-
-            var lbl = new TextBlock { Text = label, Style = (Style)FindResource("RowLabel"), VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(lbl, 0);
-
-            var target = new TextBox { Style = (Style)FindResource("DarkTextBox"), VerticalAlignment = VerticalAlignment.Center };
-            target.SetValue(FrameworkElement.ToolTipProperty, "상대 PC 이름(비우면 이 방향은 벽에 튕김)");
-            Grid.SetColumn(target, 1);
-
-            var arrow = new TextBlock { Text = "→", Foreground = (Brush)FindResource("MutedBrush"), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(arrow, 2);
-
-            var combo = new ComboBox { Style = (Style)FindResource("DarkCombo"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
-            foreach (var (e, l) in AllEdges)
-                combo.Items.Add(new ComboBoxItem { Content = l, Tag = e.ToString() });
-            Grid.SetColumn(combo, 3);
-
-            var flipPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-            flipPanel.Children.Add(new TextBlock { Text = "거울", Foreground = (Brush)FindResource("MutedBrush"), FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-            var flip = new CheckBox { Style = (Style)FindResource("Toggle"), VerticalAlignment = VerticalAlignment.Center };
-            flip.SetValue(FrameworkElement.ToolTipProperty, "진입 위치를 좌우(상하) 반전");
-            flipPanel.Children.Add(flip);
-            Grid.SetColumn(flipPanel, 4);
-
-            grid.Children.Add(lbl);
-            grid.Children.Add(target);
-            grid.Children.Add(arrow);
-            grid.Children.Add(combo);
-            grid.Children.Add(flipPanel);
-            LinkRows.Children.Add(grid);
-
-            _linkRowsUi.Add(new LinkRowUi { SelfEdge = edge, Target = target, TargetEdge = combo, Flip = flip });
-        }
-    }
+    // 배치는 "파티 순서(좌 → 우)" 하나로만 정한다(위/아래 없음). 방장이 드래그로 순서를
+    // 바꾸면 PartyLayout 이 좌우 체인 링크로 변환해 방 전체에 배포한다.
 
     private void RefreshNetworkPanel()
     {
         var a = _slime.RelayAuth;
         NetEnabled.IsChecked = a.Enabled;
-        NetServer.Text = a.ServerBaseUrl;
-        NetRoom.Text = a.RoomCode;
-        NetSecret.Password = a.Secret;
-        NetNode.Text = a.NodeId;
+        // 서버 주소는 내장값 사용 → 표시만(입력 불가). 개발용으로 덮어썼을 때만 그 값이 보인다.
+        bool custom = !string.Equals(a.EffectiveServerBaseUrl, AuthService.DefaultServerBaseUrl,
+                                     StringComparison.OrdinalIgnoreCase);
+        NetServerInfo.Text = custom
+            ? $"서버: {a.EffectiveServerBaseUrl} (개발용 오버라이드)"
+            : "서버: 기본 릴레이 서버에 자동 연결됩니다.";
 
-        var links = _slime.CurrentLinks;
-        foreach (var row in _linkRowsUi)
-        {
-            var match = links.FirstOrDefault(l =>
-                l.From == a.NodeId && HandoffMath.TryParseEdge(l.FromEdge, out var e) && e == row.SelfEdge);
-            if (match != null)
-            {
-                row.Target.Text = match.To;
-                SelectEdge(row.TargetEdge, match.ToEdge);
-                row.Flip.IsChecked = match.Flip;
-            }
-            else
-            {
-                row.Target.Text = "";
-                SelectEdge(row.TargetEdge, OppositeName(row.SelfEdge));
-                row.Flip.IsChecked = false;
-            }
-        }
+        // 이미 방에 들어가 있으면 그 값을 각 탭에 채워 둔다.
+        CreateRoom.Text = a.RoomCode;
+        JoinRoom.Text = a.RoomCode;
+        CreateSecret.Password = a.Secret;
+        JoinSecret.Password = a.Secret;
+        CreateNode.Text = a.NodeId;
+        JoinNode.Text = a.NodeId;
+
+        RefreshPartyList();
         UpdateNetStatus(_slime.RelayState);
     }
 
-    private void OnSaveNetwork(object sender, RoutedEventArgs e)
+    private void OnRoomStateChanged() => Dispatcher.Invoke(RefreshPartyList);
+
+    private void OnRoomTabChanged(object sender, RoutedEventArgs e)
+    {
+        if (PaneCreate == null || PaneJoin == null) return;
+        bool create = TabCreate.IsChecked == true;
+        PaneCreate.Visibility = create ? Visibility.Visible : Visibility.Collapsed;
+        PaneJoin.Visibility = create ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>혼동하기 쉬운 문자(0/O, 1/I) 를 뺀 방 코드 생성.</summary>
+    private void OnGenerateCode(object sender, RoutedEventArgs e)
+    {
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        var buf = new byte[4];
+        rng.GetBytes(buf);
+        var sb = new System.Text.StringBuilder("SLIME-");
+        foreach (byte b in buf) sb.Append(chars[b % chars.Length]);
+        CreateRoom.Text = sb.ToString();
+    }
+
+    private void OnCreateRoom(object sender, RoutedEventArgs e)
+        => ConnectRoom(CreateRoom.Text, CreateSecret.Password, CreateNode.Text);
+
+    private void OnJoinRoom(object sender, RoutedEventArgs e)
+        => ConnectRoom(JoinRoom.Text, JoinSecret.Password, JoinNode.Text);
+
+    /// <summary>방 코드/비밀번호/이름으로 접속. 방을 처음 만든 PC가 서버에서 방장이 된다.</summary>
+    private void ConnectRoom(string room, string secret, string node)
+    {
+        room = (room ?? "").Trim();
+        secret = secret ?? "";
+        node = (node ?? "").Trim();
+
+        if (room.Length == 0 || secret.Length == 0 || node.Length == 0)
+        {
+            PartyHint.Text = "방 코드·비밀번호·PC 이름을 모두 입력하세요.";
+            return;
+        }
+
+        var a = _slime.RelayAuth;
+        a.Enabled = true;
+        NetEnabled.IsChecked = true;
+        a.RoomCode = room;
+        a.Secret = secret;
+        a.NodeId = node;
+        _slime.ApplyRelaySettings(); // 저장 + 재연결
+        UpdateNetStatus(_slime.RelayState);
+    }
+
+    private void OnLeaveRoom(object sender, RoutedEventArgs e)
     {
         var a = _slime.RelayAuth;
-        a.Enabled = NetEnabled.IsChecked == true;
-        a.ServerBaseUrl = NetServer.Text.Trim();
-        a.RoomCode = NetRoom.Text.Trim();
-        a.Secret = NetSecret.Password;
-        if (!string.IsNullOrWhiteSpace(NetNode.Text)) a.NodeId = NetNode.Text.Trim();
-        _slime.ApplyRelaySettings(); // 저장 + 재연결
-
-        // 이 PC의 나가는 링크를 구성해 기존(다른 PC) 링크와 합쳐 방 전체에 배포.
-        var others = _slime.CurrentLinks.Where(l => l.From != a.NodeId).ToList();
-        var mine = new List<EdgeLinkDto>();
-        foreach (var row in _linkRowsUi)
-        {
-            string to = row.Target.Text.Trim();
-            if (string.IsNullOrEmpty(to)) continue;
-            string toEdge = (row.TargetEdge.SelectedItem as ComboBoxItem)?.Tag as string ?? "Left";
-            mine.Add(new EdgeLinkDto
-            {
-                From = a.NodeId, FromEdge = row.SelfEdge.ToString(),
-                To = to, ToEdge = toEdge, Flip = row.Flip.IsChecked == true,
-            });
-        }
-        _slime.PushRoomConfig(others.Concat(mine).ToList());
+        a.Enabled = false;
+        NetEnabled.IsChecked = false;
+        _slime.ApplyRelaySettings();
+        RefreshPartyList();
         UpdateNetStatus(_slime.RelayState);
+    }
+
+    // ── 파티원 목록 (드래그로 좌 → 우 순서 변경) ───────────────
+    private readonly List<string> _partyOrder = new();
+
+    private void RefreshPartyList()
+    {
+        if (PartyList == null) return;
+
+        var nodes = _slime.RoomNodes;
+        var order = _slime.RoomOrder.ToList();
+        // 순서에 없는 접속자는 뒤에 붙이고, 접속 안 한 사람은 목록에서 뺀다.
+        var online = nodes.Select(n => n.NodeId).ToHashSet(StringComparer.Ordinal);
+        var shown = order.Where(online.Contains).ToList();
+        foreach (var id in online) if (!shown.Contains(id)) shown.Add(id);
+
+        _partyOrder.Clear();
+        _partyOrder.AddRange(shown);
+
+        bool host = _slime.IsHost;
+        NetLeaveBtn.Visibility = _slime.RelayAuth.Enabled ? Visibility.Visible : Visibility.Collapsed;
+
+        PartyHint.Text = shown.Count == 0
+            ? "방에 입장하면 참여자가 표시됩니다."
+            : host
+                ? "드래그해서 순서를 바꾸세요. 왼쪽이 화면 왼쪽입니다. (방장 권한)"
+                : "배치는 방장이 정합니다.";
+
+        var panel = new StackPanel();
+        for (int i = 0; i < shown.Count; i++)
+            panel.Children.Add(BuildPartyRow(shown[i], i, host));
+        PartyList.Items.Clear();
+        PartyList.Items.Add(panel);
+
+        PartyChainInfo.Text = shown.Count > 1
+            ? "배치: " + string.Join("  |  ", shown)
+            : shown.Count == 1 ? "혼자 있는 방입니다. 다른 PC가 입장하면 좌우로 이어집니다." : "";
+    }
+
+    private Border BuildPartyRow(string nodeId, int index, bool hostCanDrag)
+    {
+        bool isSelf = nodeId == _slime.SelfNodeId;
+        bool isHost = nodeId == _slime.RoomHost;
+        bool hasBall = _slime.RoomNodes.FirstOrDefault(n => n.NodeId == nodeId)?.HasBall == true;
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var pos = new TextBlock
+        {
+            Text = (index + 1).ToString(),
+            Foreground = (Brush)FindResource("MutedBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 12,
+        };
+        Grid.SetColumn(pos, 0);
+
+        var name = new TextBlock
+        {
+            Text = nodeId + (isSelf ? " (나)" : ""),
+            Foreground = (Brush)FindResource("TextBrush"),
+            VerticalAlignment = VerticalAlignment.Center,
+            FontWeight = isSelf ? FontWeights.SemiBold : FontWeights.Normal,
+        };
+        Grid.SetColumn(name, 1);
+
+        var tags = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+        if (isHost) tags.Children.Add(Tag("방장", (Brush)FindResource("Accent")));
+        if (hasBall) tags.Children.Add(Tag("공", (Brush)FindResource("MutedBrush")));
+        if (hostCanDrag) tags.Children.Add(Tag("⠿", (Brush)FindResource("MutedBrush")));
+        Grid.SetColumn(tags, 2);
+
+        grid.Children.Add(pos);
+        grid.Children.Add(name);
+        grid.Children.Add(tags);
+
+        var row = new Border
+        {
+            CornerRadius = new CornerRadius(8),
+            Background = (Brush)FindResource("CardBg"),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 0, 0, 6),
+            Child = grid,
+            Tag = nodeId,
+            AllowDrop = hostCanDrag,
+            Cursor = hostCanDrag ? System.Windows.Input.Cursors.SizeAll : null,
+        };
+
+        if (hostCanDrag)
+        {
+            row.PreviewMouseLeftButtonDown += (s, _) =>
+            {
+                if (s is Border b && b.Tag is string id)
+                    DragDrop.DoDragDrop(b, id, DragDropEffects.Move);
+            };
+            row.Drop += OnPartyRowDrop;
+            row.DragOver += (_, ev) =>
+            {
+                ev.Effects = ev.Data.GetDataPresent(DataFormats.StringFormat) ? DragDropEffects.Move : DragDropEffects.None;
+                ev.Handled = true;
+            };
+        }
+        return row;
+
+        TextBlock Tag(string text, Brush brush) => new()
+        {
+            Text = text,
+            Foreground = brush,
+            FontSize = 11,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+    }
+
+    private void OnPartyRowDrop(object sender, System.Windows.DragEventArgs e)
+    {
+        if (!_slime.IsHost) return;
+        if (sender is not Border target || target.Tag is not string targetId) return;
+        if (e.Data.GetData(DataFormats.StringFormat) is not string draggedId) return;
+        if (draggedId == targetId) return;
+
+        int from = _partyOrder.IndexOf(draggedId);
+        int to = _partyOrder.IndexOf(targetId);
+        if (from < 0 || to < 0) return;
+
+        _partyOrder.RemoveAt(from);
+        _partyOrder.Insert(to, draggedId);
+
+        // 서버에 순서 알림 + 좌우 체인 배치 배포(방장 권한).
+        _slime.PushPartyOrder(_partyOrder.ToList());
+        RefreshPartyList();
+        e.Handled = true;
     }
 
     private void UpdateNetStatus(RelayState st)
@@ -596,20 +702,4 @@ public partial class SettingsWindow : Window
         NetStatus.Foreground = (Brush)FindResource(st == RelayState.Connected ? "TextBrush" : "MutedBrush");
     }
 
-    private static void SelectEdge(ComboBox combo, string edgeName)
-    {
-        foreach (ComboBoxItem item in combo.Items)
-        {
-            if ((item.Tag as string) == edgeName) { combo.SelectedItem = item; return; }
-        }
-        if (combo.Items.Count > 0) combo.SelectedIndex = 0;
-    }
-
-    private static string OppositeName(Edge e) => e switch
-    {
-        Edge.Left => "Right",
-        Edge.Right => "Left",
-        Edge.Top => "Bottom",
-        _ => "Top",
-    };
 }

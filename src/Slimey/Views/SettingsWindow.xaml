@@ -311,8 +311,7 @@
                             <TextBlock Text="로그인한 여러 PC를 연결해, 공이 화면 밖으로 나가면 다른 PC로 넘어갑니다. (인터넷 너머도 가능)"
                                        Style="{StaticResource RowDesc}" Margin="0,4,0,0"/>
 
-                            <TextBlock Text="연결" Style="{StaticResource Section}"/>
-                            <Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                            <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                     <TextBlock Text="멀티 PC 사용" Style="{StaticResource RowLabel}"/>
                                     <TextBlock x:Name="NetStatus" Text="꺼짐" Style="{StaticResource RowDesc}"/>
@@ -320,37 +319,83 @@
                                 <CheckBox x:Name="NetEnabled" Grid.Column="1" Style="{StaticResource Toggle}"/>
                             </Grid>
 
-                            <StackPanel Margin="0,10,0,0">
-                                <TextBlock Text="서버 주소" Style="{StaticResource RowLabel}"/>
-                                <TextBlock Text="배포한 릴레이 주소 (예: wss://slimey-relay.계정.workers.dev)" Style="{StaticResource RowDesc}"/>
-                                <TextBox x:Name="NetServer" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
-                            </StackPanel>
+                            <!-- 서버 주소는 앱에 내장(AuthService.DefaultServerBaseUrl). 사용자 입력 없음.
+                                 개발용 오버라이드는 relay.json 의 serverBaseUrl 또는 실행 인자로 지정. -->
+                            <TextBlock x:Name="NetServerInfo" Style="{StaticResource RowDesc}" Margin="0,8,0,0"/>
 
-                            <Grid Margin="0,10,0,0">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="방 코드" Style="{StaticResource RowLabel}"/>
-                                    <TextBox x:Name="NetRoom" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="시크릿(방 비밀번호)" Style="{StaticResource RowLabel}"/>
-                                    <PasswordBox x:Name="NetSecret" Style="{StaticResource DarkPassword}" Margin="0,6,0,0"/>
-                                </StackPanel>
+                            <!-- ── 탭: 방 생성 / 입장 ── -->
+                            <Grid Margin="0,18,0,0" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="8"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <RadioButton x:Name="TabCreate" Grid.Column="0" Content="방 생성" GroupName="RoomMode"
+                                             Style="{StaticResource SubTab}" IsChecked="True" Checked="OnRoomTabChanged"/>
+                                <RadioButton x:Name="TabJoin" Grid.Column="2" Content="입장" GroupName="RoomMode"
+                                             Style="{StaticResource SubTab}" Checked="OnRoomTabChanged"/>
                             </Grid>
 
-                            <StackPanel Margin="0,10,0,0">
-                                <TextBlock Text="이 PC 이름" Style="{StaticResource RowLabel}"/>
-                                <TextBlock Text="방 안에서 겹치지 않는 이름 (예: 집-데스크톱)" Style="{StaticResource RowDesc}"/>
-                                <TextBox x:Name="NetNode" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
+                            <!-- 방 생성: 방장이 되어 배치를 결정한다 -->
+                            <StackPanel x:Name="PaneCreate" Margin="0,14,0,0">
+                                <TextBlock Text="새 방을 만들면 내가 방장이 되고, 파티 순서(배치)를 정할 수 있습니다."
+                                           Style="{StaticResource RowDesc}"/>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="10"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="방 코드" Style="{StaticResource RowLabel}"/>
+                                        <TextBox x:Name="CreateRoom" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                    <Button Grid.Column="2" x:Name="GenCodeBtn" Style="{StaticResource GhostButton}"
+                                            Content="코드 생성" MinWidth="110" Height="38" VerticalAlignment="Bottom"
+                                            Click="OnGenerateCode"/>
+                                </Grid>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="비밀번호" Style="{StaticResource RowLabel}"/>
+                                        <PasswordBox x:Name="CreateSecret" Style="{StaticResource DarkPassword}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="이 PC 이름" Style="{StaticResource RowLabel}"/>
+                                        <TextBox x:Name="CreateNode" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Button x:Name="CreateBtn" Style="{StaticResource AccentButton}" Content="방 만들기"
+                                        MinWidth="150" Height="38" HorizontalAlignment="Right" Margin="0,16,0,0"
+                                        Click="OnCreateRoom"/>
                             </StackPanel>
 
-                            <TextBlock Text="엣지 매핑 (이 PC의 각 방향 → 어느 PC로)" Style="{StaticResource Section}"/>
-                            <TextBlock Text="상대 PC 이름을 비우면 그 방향은 평소처럼 벽에 튕깁니다. 저장하면 방 전체에 공유됩니다."
-                                       Style="{StaticResource RowDesc}"/>
-                            <StackPanel x:Name="LinkRows" Margin="0,10,0,0"/>
+                            <!-- 입장: 방장이 만든 방에 참여 -->
+                            <StackPanel x:Name="PaneJoin" Margin="0,14,0,0" Visibility="Collapsed">
+                                <TextBlock Text="방장에게 받은 방 코드와 비밀번호를 입력해 입장합니다. 배치는 방장이 정합니다."
+                                           Style="{StaticResource RowDesc}"/>
+                                <StackPanel Margin="0,12,0,0">
+                                    <TextBlock Text="방 코드" Style="{StaticResource RowLabel}"/>
+                                    <TextBox x:Name="JoinRoom" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
+                                </StackPanel>
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="비밀번호" Style="{StaticResource RowLabel}"/>
+                                        <PasswordBox x:Name="JoinSecret" Style="{StaticResource DarkPassword}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="이 PC 이름" Style="{StaticResource RowLabel}"/>
+                                        <TextBox x:Name="JoinNode" Style="{StaticResource DarkTextBox}" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Grid>
+                                <Button x:Name="JoinBtn" Style="{StaticResource AccentButton}" Content="입장하기"
+                                        MinWidth="150" Height="38" HorizontalAlignment="Right" Margin="0,16,0,0"
+                                        Click="OnJoinRoom"/>
+                            </StackPanel>
 
-                            <Button x:Name="NetSaveBtn" Style="{StaticResource AccentButton}" Content="저장 &amp; 적용"
-                                    MinWidth="150" Height="38" HorizontalAlignment="Right" Margin="0,20,0,6" Click="OnSaveNetwork"/>
+                            <!-- ── 파티원 (좌 → 우 배치) ── -->
+                            <TextBlock Text="파티원 (왼쪽 → 오른쪽 배치 순서)" Style="{StaticResource Section}"/>
+                            <TextBlock x:Name="PartyHint" Style="{StaticResource RowDesc}"
+                                       Text="방에 입장하면 참여자가 표시됩니다."/>
+                            <ItemsControl x:Name="PartyList" Margin="0,10,0,0"/>
+                            <TextBlock x:Name="PartyChainInfo" Style="{StaticResource RowDesc}" Margin="0,10,0,0"/>
+
+                            <Button x:Name="NetLeaveBtn" Style="{StaticResource GhostButton}" Content="방 나가기"
+                                    MinWidth="120" Height="34" HorizontalAlignment="Right" Margin="0,18,0,6"
+                                    Click="OnLeaveRoom" Visibility="Collapsed"/>
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>

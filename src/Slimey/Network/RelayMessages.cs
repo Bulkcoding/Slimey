@@ -19,6 +19,7 @@ public static class MsgType
     public const string Welcome = "WELCOME";
     public const string Presence = "PRESENCE";
     public const string RoomConfig = "ROOM_CONFIG";
+    public const string SetOrder = "SET_ORDER";
     public const string Handoff = "HANDOFF";
     public const string Ack = "ACK";
     public const string HandoffResult = "HANDOFF_RESULT";
@@ -52,6 +53,10 @@ public sealed class WelcomeData
     [JsonPropertyName("owner")] public string? Owner { get; set; }
     [JsonPropertyName("links")] public List<EdgeLinkDto> Links { get; set; } = new();
     [JsonPropertyName("nodes")] public List<NodePresenceDto> Nodes { get; set; } = new();
+    /// <summary>방장(방을 처음 만든 노드). 배치 결정 권한.</summary>
+    [JsonPropertyName("host")] public string? Host { get; set; }
+    /// <summary>파티 순서(좌 → 우).</summary>
+    [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
 }
 
 public sealed class NodePresenceDto
@@ -65,6 +70,14 @@ public sealed class PresenceData
 {
     [JsonPropertyName("nodes")] public List<NodePresenceDto> Nodes { get; set; } = new();
     [JsonPropertyName("owner")] public string? Owner { get; set; }
+    [JsonPropertyName("host")] public string? Host { get; set; }
+    [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
+}
+
+/// <summary>파티 순서 변경(방장만).</summary>
+public sealed class SetOrderData
+{
+    [JsonPropertyName("order")] public List<string> Order { get; set; } = new();
 }
 
 public sealed class EdgeLinkDto

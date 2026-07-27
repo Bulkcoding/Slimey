@@ -1554,6 +1554,58 @@ public partial class SlimeWindow : Window
     public RelayState RelayState => _relay?.State ?? RelayState.Disabled;
     public IReadOnlyList<EdgeLinkDto> CurrentLinks => _auth.Links;
 
+    // ── 방(파티) 상태 ────────────────────────────────────────
+    /// <summary>방장 nodeId(서버 권위). 배치는 방장만 바꿀 수 있다.</summary>
+    public string? RoomHost { get; private set; }
+    /// <summary>파티 순서(좌 → 우).</summary>
+    public IReadOnlyList<string> RoomOrder => _roomOrder;
+    /// <summary>현재 방에 접속해 있는 노드들.</summary>
+    public IReadOnlyList<NodePresenceDto> RoomNodes => _roomNodes;
+    /// <summary>이 PC가 방장인가.</summary>
+    public bool IsHost => !string.IsNullOrEmpty(RoomHost) && RoomHost == _selfNodeId;
+    /// <summary>내 노드 이름(서버가 확정한 값).</summary>
+    public string SelfNodeId => _selfNodeId;
+
+    private List<string> _roomOrder = new();
+    private List<NodePresenceDto> _roomNodes = new();
+
+    /// <summary>방 구성(멤버·순서·방장)이 바뀌면 발생 — 설정창이 목록을 갱신한다.</summary>
+    public event Action? RoomStateChanged;
+
+    /// <summary>방장이 파티 순서를 바꿀 때 호출. 서버에 순서를 알리고 배치(링크)를 배포한다.</summary>
+    public void PushPartyOrder(IReadOnlyList<string> order)
+    {
+        if (_relay == null || !IsHost) return;
+
+        _ = _relay.SendAsync(new Envelope
+        {
+            Type = MsgType.SetOrder,
+            From = _selfNodeId,
+            Data = RelayJson.ToElement(new SetOrderData { Order = order.ToList() }),
+        });
+
+        // 순서 → 좌우 체인 배치로 변환해 방 전체에 배포.
+        PushRoomConfig(PartyLayout.BuildChainLinks(order));
+    }
+
+    /// <summary>서버가 알려준 방 상태를 반영. 방장이면 순서에 맞는 배치를 자동으로 맞춘다.</summary>
+    private void ApplyRoomState(string? host, List<string> order, List<NodePresenceDto> nodes)
+    {
+        RoomHost = host;
+        if (order.Count > 0) _roomOrder = order;
+        _roomNodes = nodes;
+
+        // 방장은 "순서 = 배치"를 보장한다. 새 멤버가 들어와 순서가 늘어나면 링크도 따라 갱신.
+        if (IsHost && _roomOrder.Count > 1)
+        {
+            var want = PartyLayout.BuildChainLinks(_roomOrder);
+            if (!PartyLayout.SameLinks(want, _auth.Links))
+                PushRoomConfig(want);
+        }
+
+        RoomStateChanged?.Invoke();
+    }
+
     /// <summary>릴레이 활성화(설정 존재 시). 물리 area 를 네트워크 인지형으로 교체.</summary>
     private void SetupNetworking()
     {
@@ -1655,13 +1707,27 @@ public partial class SlimeWindow : Window
                 {
                     _selfNodeId = string.IsNullOrEmpty(w.NodeId) ? _selfNodeId : w.NodeId;
                     if (_coord != null) _coord.SelfNodeId = _selfNodeId;
-                    MergeLinksOnJoin(w.Links);
+                    // 방장이면 순서 기반 배치가 권위 → 링크 병합 대신 순서에서 재생성한다.
+                    if (!string.IsNullOrEmpty(w.Host) && w.Host == _selfNodeId && w.Order.Count > 1)
+                    {
+                        _auth.Links = w.Links;
+                        _coord?.SetLinks(w.Links);
+                    }
+                    else
+                    {
+                        MergeLinksOnJoin(w.Links);
+                    }
+                    ApplyRoomState(w.Host, w.Order, w.Nodes);
                     ApplyOwnership(w.Owner);
                 }
                 break;
 
             case MsgType.Presence:
-                if (env.DataAs<PresenceData>() is { } p) ApplyOwnership(p.Owner);
+                if (env.DataAs<PresenceData>() is { } p)
+                {
+                    ApplyRoomState(p.Host, p.Order, p.Nodes);
+                    ApplyOwnership(p.Owner);
+                }
                 break;
 
             case MsgType.RoomConfig:

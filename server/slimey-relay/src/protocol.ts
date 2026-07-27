@@ -11,6 +11,7 @@ export type MessageType =
   | "WELCOME"        // server → client : 인증 성공(내 nodeId·현재 owner·링크)
   | "PRESENCE"       // server → 방 전체 : 온라인 노드 목록 + owner
   | "ROOM_CONFIG"    // client → server(설정) / server → 방 전체(배포) : 엣지 매핑
+  | "SET_ORDER"      // host → server : 파티 순서(좌→우 배치) 변경. 방장만 허용
   | "HANDOFF"        // owner → server → target : 공 넘김
   | "ACK"            // target → server : 공 수락
   | "HANDOFF_RESULT" // server → origin : 최종 결과(accepted → 해제 / 거부 → 반사)
@@ -40,6 +41,13 @@ export interface WelcomeData {
   owner: string | null;    // 현재 공 소유 노드
   links: EdgeLink[];       // 엣지 매핑
   nodes: NodePresence[];   // 현재 온라인 노드
+  host: string | null;     // 방장(방을 처음 만든 노드). 배치 결정 권한
+  order: string[];         // 파티 순서(좌 → 우). 방장이 정한다
+}
+
+/** 파티 순서 변경(방장만). */
+export interface SetOrderData {
+  order: string[];         // 좌 → 우 순서의 nodeId 목록
 }
 
 export interface NodePresence {
@@ -51,6 +59,8 @@ export interface NodePresence {
 export interface PresenceData {
   nodes: NodePresence[];
   owner: string | null;
+  host: string | null;     // 현재 방장(이탈 시 다음 노드로 승계)
+  order: string[];         // 파티 순서(좌 → 우)
 }
 
 export type Edge = "Left" | "Right" | "Top" | "Bottom";
@@ -103,6 +113,7 @@ export const ErrorCodes = {
   BAD_SECRET: "BAD_SECRET",
   ROOM_FULL: "ROOM_FULL",
   NOT_OWNER: "NOT_OWNER",
+  NOT_HOST: "NOT_HOST",
   TARGET_OFFLINE: "TARGET_OFFLINE",
   VERSION_MISMATCH: "VERSION_MISMATCH",
 } as const;
@@ -115,3 +126,7 @@ export const HANDOFF_TIMEOUT_MS = 1500;
 
 // 하트비트 없이 이 시간(ms) 지나면 죽은 연결로 간주(참고용).
 export const HEARTBEAT_TIMEOUT_MS = 45_000;
+
+// 모두 나가고 이 시간(ms) 동안 아무도 안 들어오면 방을 폐기한다(시크릿·순서·배치 전부 삭제).
+// 잠깐 껐다 켜는 경우(앱 재시작·네트워크 끊김)에는 방이 유지되도록 넉넉히 잡는다.
+export const EMPTY_ROOM_TTL_MS = 30 * 60 * 1000; // 30분

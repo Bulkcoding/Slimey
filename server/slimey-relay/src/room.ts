@@ -20,6 +20,7 @@ import {
   ErrorCodes,
   MAX_NODES_PER_ROOM,
   HANDOFF_TIMEOUT_MS,
+  EMPTY_ROOM_TTL_MS,
   type Envelope,
   type EdgeLink,
   type HelloData,
@@ -47,6 +48,12 @@ export class RoomDurableObject extends DurableObject<Env> {
   private links: EdgeLink[] = [];
   private pending: PendingHandoff | null = null;
   private seq = 0;
+  /** 방장 = 방을 처음 만든(최초 참여) 노드. 배치(순서) 결정 권한을 가진다. */
+  private host: string | null = null;
+  /** 파티 순서(좌 → 우). 방장이 정한다. 참여 순서대로 뒤에 붙는다. */
+  private order: string[] = [];
+  /** 빈 방 폐기 예정 시각(epoch ms). null = 폐기 예약 없음(누군가 접속 중). */
+  private disposeAt: number | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -57,6 +64,9 @@ export class RoomDurableObject extends DurableObject<Env> {
       this.links = (await ctx.storage.get<EdgeLink[]>("links")) ?? [];
       this.pending = (await ctx.storage.get<PendingHandoff | null>("pending")) ?? null;
       this.seq = (await ctx.storage.get<number>("seq")) ?? 0;
+      this.host = (await ctx.storage.get<string | null>("host")) ?? null;
+      this.order = (await ctx.storage.get<string[]>("order")) ?? [];
+      this.disposeAt = (await ctx.storage.get<number | null>("disposeAt")) ?? null;
     });
   }
 
@@ -97,7 +107,9 @@ export class RoomDurableObject extends DurableObject<Env> {
       case "ACK":
         return this.handleAck(meta, env as Envelope<AckData>);
       case "ROOM_CONFIG":
-        return this.handleRoomConfig(env as Envelope<{ links: EdgeLink[] }>);
+        return this.handleRoomConfig(meta, env as Envelope<{ links: EdgeLink[] }>);
+      case "SET_ORDER":
+        return this.handleSetOrder(meta, env as Envelope<{ order: string[] }>);
       default:
         return this.sendError(ws, ErrorCodes.BAD_MESSAGE, `unknown type ${env.type}`);
     }
@@ -145,10 +157,29 @@ export class RoomDurableObject extends DurableObject<Env> {
 
     ws.serializeAttachment({ nodeId, version } satisfies SocketMeta);
 
+    // 누군가 들어왔으니 빈 방 폐기 예약을 취소한다.
+    if (this.disposeAt !== null) {
+      this.disposeAt = null;
+      await this.ctx.storage.delete("disposeAt");
+      await this.rescheduleAlarm();
+    }
+
     // 소유자가 아직 없으면 최초 인증 노드가 공을 가진다.
     if (this.owner === null) {
       this.owner = nodeId;
       await this.ctx.storage.put("owner", this.owner);
+    }
+
+    // 방장이 없으면 최초 참여자(= 방을 만든 사람)가 방장.
+    if (this.host === null) {
+      this.host = nodeId;
+      await this.ctx.storage.put("host", this.host);
+    }
+
+    // 파티 순서에 없으면 맨 뒤(가장 오른쪽)에 추가.
+    if (!this.order.includes(nodeId)) {
+      this.order = [...this.order, nodeId];
+      await this.ctx.storage.put("order", this.order);
     }
 
     // WELCOME(개별) + PRESENCE(전체) 통지.
@@ -157,7 +188,10 @@ export class RoomDurableObject extends DurableObject<Env> {
       type: "WELCOME",
       roomId: env.roomId,
       to: nodeId,
-      data: { nodeId, owner: this.owner, links: this.links, nodes: this.presenceNodes() },
+      data: {
+        nodeId, owner: this.owner, links: this.links, nodes: this.presenceNodes(),
+        host: this.host, order: this.order,
+      },
     });
     this.broadcastPresence();
   }
@@ -190,7 +224,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     // in-transit 기록 + 타임아웃 알람. owner 는 ACK 전까지 from 유지(롤백 대비).
     this.pending = { handoffId: data.handoffId, from, to, expiresAt: Date.now() + HANDOFF_TIMEOUT_MS };
     await this.ctx.storage.put("pending", this.pending);
-    await this.ctx.storage.setAlarm(this.pending.expiresAt);
+    await this.rescheduleAlarm();
 
     // 대상에게 핸드오프 전달.
     this.send(target, {
@@ -228,31 +262,80 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
   }
 
-  // ── ROOM_CONFIG: 엣지 매핑 설정·배포 ────────────────────────
-  private async handleRoomConfig(env: Envelope<{ links: EdgeLink[] }>): Promise<void> {
+  // ── ROOM_CONFIG: 엣지 매핑 설정·배포(방장만) ────────────────
+  private async handleRoomConfig(meta: SocketMeta, env: Envelope<{ links: EdgeLink[] }>): Promise<void> {
     const links = env.data?.links;
     if (!Array.isArray(links)) return;
+
+    // 배치는 방장이 결정한다(다른 사람이 임의로 바꾸지 못하게).
+    if (this.host !== null && this.host !== meta.nodeId) {
+      return this.sendToNode(meta.nodeId, {
+        v: PROTOCOL_VERSION, type: "ERROR",
+        data: { code: ErrorCodes.NOT_HOST, message: "only host can change layout" },
+      });
+    }
+
     this.links = links;
     await this.ctx.storage.put("links", links);
     this.broadcast({ v: PROTOCOL_VERSION, type: "ROOM_CONFIG", data: { links } });
   }
 
-  // ── 타임아웃 알람: ACK 안 오면 롤백 ─────────────────────────
-  async alarm(): Promise<void> {
-    if (!this.pending) return;
-    if (Date.now() < this.pending.expiresAt) {
-      // 아직 이르면 다시 예약(안전).
-      await this.ctx.storage.setAlarm(this.pending.expiresAt);
-      return;
+  // ── SET_ORDER: 파티 순서(좌→우) 변경(방장만) ────────────────
+  private async handleSetOrder(meta: SocketMeta, env: Envelope<{ order: string[] }>): Promise<void> {
+    const incoming = env.data?.order;
+    if (!Array.isArray(incoming)) return;
+
+    if (this.host !== meta.nodeId) {
+      return this.sendToNode(meta.nodeId, {
+        v: PROTOCOL_VERSION, type: "ERROR",
+        data: { code: ErrorCodes.NOT_HOST, message: "only host can change party order" },
+      });
     }
-    const from = this.pending.from;
-    const handoffId = this.pending.handoffId;
-    this.clearPending();
-    // owner 는 from 유지 → origin 이 공을 되돌려 반사.
-    this.sendToNode(from, {
-      v: PROTOCOL_VERSION, type: "HANDOFF_RESULT",
-      data: { handoffId, accepted: false, reason: "timeout" },
-    });
+
+    // 알려진 노드만, 중복 없이 수용. 빠진 기존 노드는 뒤에 붙여 유실 방지.
+    const known = new Set(this.order);
+    for (const n of this.presenceNodes()) known.add(n.nodeId);
+
+    const seen = new Set<string>();
+    const next: string[] = [];
+    for (const id of incoming) {
+      const t = (id ?? "").trim();
+      if (t && known.has(t) && !seen.has(t)) { seen.add(t); next.push(t); }
+    }
+    for (const id of known) if (!seen.has(id)) next.push(id);
+
+    this.order = next;
+    await this.ctx.storage.put("order", this.order);
+    this.broadcastPresence();
+  }
+
+  // ── 알람: 핸드오프 ACK 타임아웃 + 빈 방 폐기 ────────────────
+  async alarm(): Promise<void> {
+    const now = Date.now();
+
+    // 1) 핸드오프 ACK 타임아웃 → owner 롤백(origin 이 반사).
+    if (this.pending && now >= this.pending.expiresAt) {
+      const from = this.pending.from;
+      const handoffId = this.pending.handoffId;
+      this.clearPending();
+      this.sendToNode(from, {
+        v: PROTOCOL_VERSION, type: "HANDOFF_RESULT",
+        data: { handoffId, accepted: false, reason: "timeout" },
+      });
+    }
+
+    // 2) 빈 방 폐기. 그 사이 누가 들어왔으면 예약을 취소한다.
+    if (this.disposeAt !== null && now >= this.disposeAt) {
+      if (this.authenticatedSockets().length === 0) {
+        await this.disposeRoom();
+        return; // 전부 지웠으므로 재예약 불필요
+      }
+      this.disposeAt = null;
+      await this.ctx.storage.delete("disposeAt");
+    }
+
+    // 남은 마감시각이 있으면 다시 예약.
+    await this.rescheduleAlarm();
   }
 
   // ── 연결 해제 처리 ───────────────────────────────────────────
@@ -267,11 +350,61 @@ export class RoomDurableObject extends DurableObject<Env> {
       this.owner = remaining.length > 0 ? remaining[0].nodeId : null;
       await this.ctx.storage.put("owner", this.owner);
     }
+    // 방장이 나가면 남아 있는 노드 중 파티 순서상 가장 앞선 노드로 승계.
+    // (방장이 없으면 아무도 배치를 바꿀 수 없게 되므로 반드시 넘긴다.)
+    if (this.host === gone) {
+      const online = new Set(this.presenceNodes().map((n) => n.nodeId).filter((id) => id !== gone));
+      const next = this.order.find((id) => online.has(id)) ?? [...online][0] ?? null;
+      this.host = next;
+      await this.ctx.storage.put("host", this.host);
+    }
+
     // 진행 중 핸드오프의 당사자가 사라지면 정리.
     if (this.pending && (this.pending.from === gone || this.pending.to === gone)) {
       this.clearPending();
     }
+
+    // 마지막 한 명까지 나갔으면 일정 시간 뒤 방을 폐기하도록 예약한다.
+    // (닫히는 소켓이 아직 목록에 남아 있을 수 있으므로 소켓 동일성으로 제외한다.)
+    const others = this.authenticatedSockets().filter((s) => s !== ws);
+    if (others.length === 0) {
+      this.disposeAt = Date.now() + EMPTY_ROOM_TTL_MS;
+      await this.ctx.storage.put("disposeAt", this.disposeAt);
+      await this.rescheduleAlarm();
+    }
+
     this.broadcastPresence();
+  }
+
+  /** 방 폐기: 저장 상태(시크릿·순서·배치·소유권)를 모두 지우고 초기 상태로 되돌린다. */
+  private async disposeRoom(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    await this.ctx.storage.deleteAlarm();
+    // 인스턴스가 메모리에 남아 있을 수 있으므로 메모리 상태도 초기화.
+    this.owner = null;
+    this.secretHash = null;
+    this.links = [];
+    this.pending = null;
+    this.host = null;
+    this.order = [];
+    this.disposeAt = null;
+    this.seq = 0;
+  }
+
+  /**
+   * 알람은 DO 당 하나뿐이라 "핸드오프 타임아웃"과 "빈 방 폐기" 두 마감시각을 함께 관리한다.
+   * 더 이른 쪽으로 예약하고, 둘 다 없으면 알람을 지운다.
+   */
+  private async rescheduleAlarm(): Promise<void> {
+    const deadlines: number[] = [];
+    if (this.pending) deadlines.push(this.pending.expiresAt);
+    if (this.disposeAt !== null) deadlines.push(this.disposeAt);
+
+    if (deadlines.length === 0) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Math.min(...deadlines));
   }
 
   // ── 유틸 ─────────────────────────────────────────────────────
@@ -306,7 +439,7 @@ export class RoomDurableObject extends DurableObject<Env> {
   private broadcastPresence(): void {
     this.broadcast({
       v: PROTOCOL_VERSION, type: "PRESENCE",
-      data: { nodes: this.presenceNodes(), owner: this.owner },
+      data: { nodes: this.presenceNodes(), owner: this.owner, host: this.host, order: this.order },
     });
   }
 
@@ -338,7 +471,8 @@ export class RoomDurableObject extends DurableObject<Env> {
   private clearPending(): void {
     this.pending = null;
     void this.ctx.storage.delete("pending");
-    void this.ctx.storage.deleteAlarm();
+    // 알람을 그냥 지우면 빈 방 폐기 예약까지 취소되므로 재계산한다.
+    void this.rescheduleAlarm();
   }
 
   private nextSeq(): number {
