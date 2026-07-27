@@ -97,8 +97,10 @@ public partial class HoopWindow : Window
         _netKickCap = s * 2.55;     // 그물 킥 상한(펄럭임 약 5% ↑, 그래도 절제)
         _maxDisp = s * 0.38;        // 노드 변위 상한(림까지 못 올라가게)
         RimEdgeRadius = s * 0.07;
-        // 공(반경 0.44S)이 정중앙으로 깨끗이 지날 수 있는 폭 안에서만 득점 인정.
-        RimHalfWidth = s * 0.17; // < rimRx - RimEdgeRadius - 0.44S(≈0.18S)
+        // 득점 인정 폭. 겹침 없이 깨끗이 지나는 폭은 rimRx - RimEdgeRadius - 0.44S(≈0.18S)뿐인데,
+        // 빠른 공은 프레임 단위 이동 때문에 림 높이에서 이미 살짝 겹친 상태로 통과한다(눈에는 들어간 골).
+        // 공 표면이 림 튜브 중심(rimRx)에 닿는 지점까지 허용: 0.69 - 0.44 ≈ 0.25S.
+        RimHalfWidth = s * 0.24;
 
         double rimYphys = wa.Top + wa.Height * 0.42;    // 골대 높이(조금 아래로)
         double bbCenterY = rimYphys - s * 1.25;         // 뒷판 대부분이 림 위로(현실적)
