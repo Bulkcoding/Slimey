@@ -8,7 +8,7 @@ namespace ThrowMe.Services;
 
 /// <summary>
 /// 시스템 트레이 아이콘과 메뉴. 표시/숨김·일시정지·항상 위·위치 초기화·설정·종료를 제공한다.
-/// 아이콘은 에셋 없이 코드로 생성하며(디자인 트랙이 .ico 로 교체 가능),
+/// 아이콘은 Resources/ThrowMe.ico 를 쓰고, 리소스를 못 읽으면 코드로 그린 것으로 대체한다.
 /// 상태 체크는 AppSettings.PropertyChanged 로 양방향 동기화된다.
 /// </summary>
 public sealed class TrayIconService : IDisposable
@@ -71,7 +71,13 @@ public sealed class TrayIconService : IDisposable
     }
 
     /// <summary>민트색 슬라임 원형 아이콘을 코드로 생성.</summary>
-    private static Icon CreateIcon()
+    /// <summary>
+    /// 트레이 아이콘. 기본은 Resources/ThrowMe.ico 이고,
+    /// 리소스를 못 읽는 경우에만 코드로 그린 대체 아이콘을 쓴다.
+    /// </summary>
+    private static Icon CreateIcon() => AppIcon.CreateTrayIcon() ?? CreateFallbackIcon();
+
+    private static Icon CreateFallbackIcon()
     {
         using var bmp = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(bmp))

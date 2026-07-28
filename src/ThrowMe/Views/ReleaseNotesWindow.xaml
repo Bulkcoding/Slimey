@@ -5,7 +5,7 @@
         Width="460" SizeToContent="Height" MaxHeight="560"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
-        ShowInTaskbar="False" Topmost="True" FontFamily="Pretendard, Malgun Gothic">
+        ShowInTaskbar="False" Topmost="True" FontFamily="Pretendard, Malgun Gothic" Icon="/Resources/ThrowMe.ico">
 
     <Border CornerRadius="16" Background="{StaticResource WinBg}" ClipToBounds="True">
         <Border.Effect>
