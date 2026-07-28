@@ -147,6 +147,33 @@
                                 <TextBlock Grid.Column="0" Text="슬라임 표시" Style="{StaticResource RowLabel}" VerticalAlignment="Center"/>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding SlimeVisible}"/>
                             </Grid>
+                            <Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="작업표시줄에 표시" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="작업표시줄과 Alt+Tab 목록에 ThrowMe 를 표시합니다." Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding ShowInTaskbar}"/>
+                            </Grid>
+                            <Grid Margin="0,8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="230"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="클릭 여유" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="공 주변 이 범위까지 클릭이 잡힙니다. 넓히면 날아가는 공을 치기 쉽지만, 그만큼 뒤에 있는 창의 클릭을 가립니다."
+                                               Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <Grid Grid.Column="1" VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="46"/></Grid.ColumnDefinitions>
+                                    <Slider Grid.Column="0" Style="{StaticResource DarkSlider}" Minimum="0" Maximum="120" Value="{Binding ClickMarginPx}"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource RowValue}" Text="{Binding ClickMarginPx, StringFormat={}{0:0}px}"/>
+                                </Grid>
+                            </Grid>
+                            <Grid Margin="0,6"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="알림 표시" Style="{StaticResource RowLabel}"/>
+                                    <TextBlock Text="공이 다른 PC로 넘어가면 우측 하단에 알려줍니다." Style="{StaticResource RowDesc}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Toggle}" IsChecked="{Binding ShowToasts}"/>
+                            </Grid>
 
                             <!-- 당구(당구공 스킨일 때만 표시) -->
                             <StackPanel x:Name="BilliardSection">

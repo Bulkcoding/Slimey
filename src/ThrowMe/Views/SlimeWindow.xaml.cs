@@ -100,6 +100,7 @@ public partial class SlimeWindow : Window
         InitializeComponent();
 
         Topmost = _settings.AlwaysOnTop;
+        ShowInTaskbar = _settings.ShowInTaskbar;
         _settings.PropertyChanged += OnSettingsChanged;
 
         _tracker = new ThrowInputTracker(_settings);
@@ -344,6 +345,10 @@ public partial class SlimeWindow : Window
         SpinFxBox.Height = 2.5 * s / _dpiScaleY;
         SlimeBox.Width = s / _dpiScaleX;
         SlimeBox.Height = s / _dpiScaleY;
+        // 클릭 영역은 공 + 여유만. 창 전체를 받으면 날아가는 동안 다른 창 클릭을 삼킨다.
+        double hit = s + 2.0 * Math.Max(0, _settings.ClickMarginPx);
+        HitArea.Width = hit / _dpiScaleX;
+        HitArea.Height = hit / _dpiScaleY;
         // 스핀 조준 원(공의 66% 크기)
         SpinAim.Width = 0.66 * s / _dpiScaleX;
         SpinAim.Height = 0.66 * s / _dpiScaleY;
@@ -760,6 +765,12 @@ public partial class SlimeWindow : Window
                     _animation.Punch(); // 젤리만 잡히는 느낌의 작은 스쿼시
                 break;
 
+            case ReleaseAction.Deflect:
+                CloseBallIfOpen();
+                if (_settings.PunchMode) Deflect(cursor, _grabbedSpeed);
+                else _animation.Punch(); // 때리기를 껐으면 반응만
+                break;
+
             case ReleaseAction.Click:
                 if (_settings.PunchMode)
                     DoClickEffect(cursor);
@@ -774,14 +785,42 @@ public partial class SlimeWindow : Window
         if (SkinHost.Content is ISkinClickEffect b && b.IsOpen) b.SetOpen(false);
     }
 
-    private enum ReleaseAction { Throw, CatchHold, Click }
+    private enum ReleaseAction { Throw, CatchHold, Click, Deflect }
 
-    /// <summary>놓을 때 동작 판정. 많이 움직였으면 던지기, 조금이라도 움직이던 걸 잡았으면 낚아채기, 그 외 클릭.</summary>
+    /// <summary>
+    /// 놓을 때 동작 판정.
+    ///  - 많이 움직였으면 던지기
+    ///  - 날아가던 걸 제자리 클릭했으면 되치기(속도 유지 + 방향 전환)
+    ///  - 느리게 움직이던 걸 잡았으면 낚아채기
+    ///  - 그 외 정지 상태 클릭
+    /// </summary>
     private ReleaseAction ClassifyRelease(double movedPx, double grabbedSpeed)
     {
         if (movedPx >= _settings.ClickMoveThreshold) return ReleaseAction.Throw;
+        if (grabbedSpeed >= _settings.DeflectMinSpeed) return ReleaseAction.Deflect;
         if (grabbedSpeed > _settings.CatchSpeedThreshold) return ReleaseAction.CatchHold;
         return ReleaseAction.Click;
+    }
+
+    /// <summary>
+    /// 되치기: 날아가던 공을 클릭한 지점 반대쪽으로 튕겨 보낸다.
+    /// 속도를 죽이지 않고(원래 속도 유지, 최소 PunchImpulse) 방향만 바꿔 라켓으로 치는 느낌.
+    /// </summary>
+    private void Deflect(Vector2 cursor, double incomingSpeed)
+    {
+        Vector2 center = _physics.Position + new Vector2(_settings.SlimeSize / 2.0, _settings.SlimeSize / 2.0);
+        Vector2 dir = (center - cursor).Normalized();
+        if (dir.LengthSquared < 1e-6) dir = new Vector2(0, -1); // 정확히 중앙을 눌렀으면 위로
+
+        double speed = Math.Max(incomingSpeed, _settings.PunchImpulse);
+        _physics.Velocity = dir * Math.Min(speed, _settings.MaxSpeed);
+
+        // 맞은 세기는 들어온 속도 기준 — 빠른 공을 되치면 더 크게 반응한다.
+        double intensity = Math.Clamp(incomingSpeed / _settings.ImpactReferenceSpeed, 0.25, 1.0);
+        _animation.OnImpact(incomingSpeed);
+        _particles.Emit(cursor, intensity, ImpactTier.Boing);
+        _hitText.Spawn(center, intensity);
+        _audio.PlayPunch(0.5 + 0.5 * intensity);
     }
 
     // ── 렌더 루프 ───────────────────────────────────────────
@@ -953,6 +992,12 @@ public partial class SlimeWindow : Window
         {
             case nameof(AppSettings.AlwaysOnTop):
                 Topmost = _settings.AlwaysOnTop;
+                break;
+            case nameof(AppSettings.ShowInTaskbar):
+                ShowInTaskbar = _settings.ShowInTaskbar;
+                break;
+            case nameof(AppSettings.ClickMarginPx):
+                ApplyWindowSize(); // 클릭 원 크기 갱신
                 break;
             case nameof(AppSettings.Paused):
                 if (!_settings.Paused) EnsureRendering();
@@ -1884,9 +1929,41 @@ public partial class SlimeWindow : Window
     private void ApplyOwnership(string? owner)
     {
         bool mine = owner != null && owner == _selfNodeId;
-        if (mine && !_ownsBall) GainBall(spawnAtCenter: true);   // (재)소유 획득 — 이양 등
-        else if (!mine && _ownsBall) LoseBall();
+        if (mine && !_ownsBall)
+        {
+            GainBall(spawnAtCenter: true);   // (재)소유 획득 — 이양 등
+            NotifyBallMoved(null);
+        }
+        else if (!mine && _ownsBall)
+        {
+            LoseBall();
+            NotifyBallMoved(owner);
+        }
         _ownsBall = mine;
+    }
+
+    /// <summary>
+    /// 공 위치가 바뀌었음을 우측 하단 토스트로 알린다.
+    /// 공이 다른 PC로 넘어가면 이 PC 화면에서 슬라임이 사라지는데, 알림이 없으면
+    /// 앱이 죽은 것처럼 보인다(실제로 그렇게 오해하기 쉬웠다).
+    /// </summary>
+    /// <param name="newOwner">공을 가져간 PC 이름. null 이면 이 PC가 받았다는 뜻.</param>
+    private void NotifyBallMoved(string? newOwner)
+    {
+        if (!_settings.ShowToasts) return;
+
+        try
+        {
+            if (newOwner == null)
+                ToastWindow.Show("공이 도착했습니다", "이제 이 PC 에서 던질 수 있어요.");
+            else
+                ToastWindow.Show($"공이 {newOwner} 로 넘어갔습니다",
+                    $"{newOwner} 에서 이쪽으로 던지면 다시 돌아옵니다.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to notify ball handoff.", ex);
+        }
     }
 
     private void GainBall(bool spawnAtCenter)
@@ -2602,6 +2679,7 @@ public partial class SlimeWindow : Window
     public void ShutdownCleanup()
     {
         StopRendering();
+        ToastWindow.CloseAll();
         _relay?.Dispose();
         if (_hwnd != IntPtr.Zero)
         {

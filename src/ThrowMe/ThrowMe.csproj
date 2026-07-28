@@ -17,9 +17,9 @@
     <!-- exe(탐색기·작업표시줄·바로가기) 아이콘 -->
     <ApplicationIcon>Resources\ThrowMe.ico</ApplicationIcon>
     <!-- 버전(자동 업데이트 비교 기준). 릴리스마다 올린다. -->
-    <Version>1.7.0</Version>
-    <AssemblyVersion>1.7.0.0</AssemblyVersion>
-    <FileVersion>1.7.0.0</FileVersion>
+    <Version>1.8.0</Version>
+    <AssemblyVersion>1.8.0.0</AssemblyVersion>
+    <FileVersion>1.8.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

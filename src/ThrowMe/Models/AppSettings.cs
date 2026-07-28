@@ -227,6 +227,26 @@ public sealed class AppSettings : INotifyPropertyChanged
     private bool _showReleaseNotes = true;
     public bool ShowReleaseNotes { get => _showReleaseNotes; set => Set(ref _showReleaseNotes, value); }
 
+    /// <summary>작업표시줄에 ThrowMe 를 표시할지(Alt+Tab 에도 함께 나온다).</summary>
+    private bool _showInTaskbar = true;
+    public bool ShowInTaskbar { get => _showInTaskbar; set => Set(ref _showInTaskbar, value); }
+
+    /// <summary>
+    /// 공 주변에서 클릭을 받아들이는 여유(px). 공 반지름 + 이 값이 클릭 반경이 된다.
+    ///
+    /// 예전에는 창 전체(공 크기의 4배)가 클릭을 받아서, 공이 날아가는 동안 보이지 않는
+    /// 사각형이 다른 창의 클릭을 삼켰다(설정창 탭이 안 눌리는 문제). 공 근처로 좁힌다.
+    /// </summary>
+    private double _clickMarginPx = 28.0;
+    public double ClickMarginPx { get => _clickMarginPx; set => Set(ref _clickMarginPx, value); }
+
+    /// <summary>공이 다른 PC로 넘어가는 등 알림을 우측 하단 토스트로 보여줄지.</summary>
+    private bool _showToasts = true;
+    public bool ShowToasts { get => _showToasts; set => Set(ref _showToasts, value); }
+
+    /// <summary>날아가는 중 클릭으로 방향을 바꿀 때, 이 속도(px/s) 이상이면 "되치기"로 본다.</summary>
+    public double DeflectMinSpeed { get; set; } = 150.0;
+
     /// <summary>
     /// 새 버전을 받으면 그 자리에서 "지금 재시작할까요?" 를 물을지.
     /// 끄면 묻지 않고 다음 실행 때 조용히 적용된다(= 앱을 두 번 켜야 새 버전).

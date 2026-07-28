@@ -5,7 +5,8 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ShowInTaskbar="False"
+        ShowInTaskbar="True"
+        Icon="/Resources/ThrowMe.ico"
         Topmost="True"
         ResizeMode="NoResize"
         SizeToContent="Manual"
@@ -42,10 +43,13 @@
     <!-- 창은 슬라임보다 넉넉히 커서(패딩) 주변 이펙트를 그릴 수 있다. -->
     <Grid>
 
-        <!-- 전체 창을 클릭 대상으로: 날아가는 슬라임을 넉넉한 범위로 낚아챌 수 있게 함.
+        <!-- 클릭 영역: 공 주변 원형으로만 받는다(크기는 코드에서 SlimeSize + ClickMarginPx).
              레이어드 창은 alpha=0(#00) 픽셀을 OS 단에서 클릭 통과시키므로,
-             거의 안 보이는 alpha=1(#01) 배경으로 클릭을 확실히 잡는다. -->
-        <Border Background="#01000000"/>
+             거의 안 보이는 alpha=1(#01) 로 칠한 이 원 안에서만 클릭이 잡히고 나머지는 통과한다.
+             예전에는 창 전체(공의 4배)를 칠해서, 날아가는 동안 보이지 않는 사각형이
+             다른 창의 클릭을 삼켰다(설정창 탭이 안 눌리는 문제). -->
+        <Ellipse x:Name="HitArea" Fill="#01000000"
+                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
         <!-- ═══ 스핀 이펙트: 중앙 고정(창 크기와 분리), 설계 캔버스 240 ═══ -->
         <Viewbox x:Name="SpinFxBox" Stretch="Uniform" IsHitTestVisible="False"
