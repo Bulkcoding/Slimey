@@ -1,0 +1,117 @@
+<UserControl x:Class="ThrowMe.Views.Skins.BallSkin"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             IsHitTestVisible="True">
+    <Viewbox Stretch="Uniform">
+        <Grid Width="96" Height="96">
+            <Canvas Width="96" Height="96">
+                <Canvas.Clip>
+                    <EllipseGeometry Center="48,48" RadiusX="45" RadiusY="45"/>
+                </Canvas.Clip>
+
+                <!-- 내부(오목한 껍질) — 열렸을 때 드러남. 빛나지 않고 금속 hollow 느낌. -->
+                <Ellipse Canvas.Left="9" Canvas.Top="9" Width="78" Height="78">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush GradientOrigin="0.5,0.42" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                            <GradientStop Color="#14161A" Offset="0.0"/>
+                            <GradientStop Color="#23262C" Offset="0.55"/>
+                            <GradientStop Color="#3C4048" Offset="0.86"/>
+                            <GradientStop Color="#191B1F" Offset="1.0"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+                <!-- 내부 바닥 반사(옅은 하이라이트) -->
+                <Ellipse Canvas.Left="30" Canvas.Top="56" Width="36" Height="14" Fill="#22FFFFFF"/>
+
+                <!-- 아래 반쪽(흰색 그릇) — 열릴 때 아래로 -->
+                <Canvas x:Name="BottomGroup" Width="96" Height="96">
+                    <Canvas.RenderTransform><TranslateTransform x:Name="BottomShift"/></Canvas.RenderTransform>
+                    <Rectangle Canvas.Left="0" Canvas.Top="47" Width="96" Height="49">
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#FFFFFF" Offset="0.0"/>
+                                <GradientStop Color="#EEF1F5" Offset="0.4"/>
+                                <GradientStop Color="#D2D7DF" Offset="0.78"/>
+                                <GradientStop Color="#BCC1CB" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                    <!-- 그릇 안쪽 테두리(열렸을 때 위쪽 립) -->
+                    <Ellipse Canvas.Left="12" Canvas.Top="40" Width="72" Height="20" Fill="#33000000"/>
+                </Canvas>
+
+                <!-- 위 반쪽(뚜껑): 색 + 마킹 + 띠 + 가운데 버튼 → 열릴 때 함께 위로 -->
+                <Canvas x:Name="TopGroup" Width="96" Height="96">
+                    <Canvas.RenderTransform><TranslateTransform x:Name="TopShift"/></Canvas.RenderTransform>
+                    <Rectangle x:Name="TopHalf" Canvas.Left="0" Canvas.Top="0" Width="96" Height="49"/>
+                    <Canvas x:Name="Decoration" Width="96" Height="96"/>
+                    <Rectangle Canvas.Left="0" Canvas.Top="42" Width="96" Height="12">
+                        <Rectangle.Fill>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Color="#35353D" Offset="0.0"/>
+                                <GradientStop Color="#17171C" Offset="1.0"/>
+                            </LinearGradientBrush>
+                        </Rectangle.Fill>
+                    </Rectangle>
+                    <!-- 상단 광택(뚜껑 표면) -->
+                    <Ellipse Canvas.Left="0" Canvas.Top="0" Width="96" Height="96">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush GradientOrigin="0.36,0.24" Center="0.36,0.24" RadiusX="0.55" RadiusY="0.55">
+                                <GradientStop Color="#55FFFFFF" Offset="0.0"/>
+                                <GradientStop Color="#1EFFFFFF" Offset="0.32"/>
+                                <GradientStop Color="#00FFFFFF" Offset="0.58"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Canvas.Left="20" Canvas.Top="12" Width="18" Height="11" Fill="#B0FFFFFF"/>
+                    <!-- 가운데 버튼(뚜껑에 부착) -->
+                    <Ellipse Canvas.Left="30" Canvas.Top="30" Width="36" Height="36">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Color="#45454F" Offset="0.0"/><GradientStop Color="#1B1B21" Offset="0.8"/><GradientStop Color="#0D0D11" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Canvas.Left="34" Canvas.Top="34" Width="28" Height="28">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush GradientOrigin="0.35,0.28" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Color="#F6F6FA" Offset="0.0"/><GradientStop Color="#C6C6D0" Offset="0.55"/><GradientStop Color="#8C8C98" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Canvas.Left="37" Canvas.Top="37" Width="22" Height="22">
+                        <Ellipse.Fill>
+                            <RadialGradientBrush GradientOrigin="0.35,0.3" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                <GradientStop Color="#FFFFFF" Offset="0.0"/><GradientStop Color="#E2E5EB" Offset="0.5"/><GradientStop Color="#B9BEC8" Offset="1.0"/>
+                            </RadialGradientBrush>
+                        </Ellipse.Fill>
+                    </Ellipse>
+                    <Ellipse Canvas.Left="41" Canvas.Top="40" Width="7" Height="6" Fill="#DDFFFFFF"/>
+                </Canvas>
+
+                <!-- 바깥 가장자리 음영(전체 rim, 정적) -->
+                <Ellipse Canvas.Left="0" Canvas.Top="0" Width="96" Height="96" IsHitTestVisible="False">
+                    <Ellipse.Fill>
+                        <RadialGradientBrush GradientOrigin="0.5,0.5" Center="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                            <GradientStop Color="#00000000" Offset="0.0"/>
+                            <GradientStop Color="#00000000" Offset="0.72"/>
+                            <GradientStop Color="#40000000" Offset="0.93"/>
+                            <GradientStop Color="#80000000" Offset="1.0"/>
+                        </RadialGradientBrush>
+                    </Ellipse.Fill>
+                </Ellipse>
+            </Canvas>
+
+            <!-- 어두운 테두리 + 좌상단 림 라이트 -->
+            <Ellipse Margin="2" Stroke="#141418" StrokeThickness="2.5" IsHitTestVisible="False"/>
+            <Ellipse Margin="2" StrokeThickness="2" IsHitTestVisible="False">
+                <Ellipse.Stroke>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#99FFFFFF" Offset="0.0"/>
+                        <GradientStop Color="#00FFFFFF" Offset="0.45"/>
+                    </LinearGradientBrush>
+                </Ellipse.Stroke>
+            </Ellipse>
+        </Grid>
+    </Viewbox>
+</UserControl>

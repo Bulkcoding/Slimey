@@ -1,0 +1,16 @@
+<Window x:Class="ThrowMe.Views.HitTextOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ThrowMeHitText"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Focusable="False"
+        IsHitTestVisible="False"
+        ResizeMode="NoResize"
+        SizeToContent="Manual">
+    <!-- 타격 문구(메이플식) 렌더 전용 레이어. 입력 통과. -->
+    <Canvas x:Name="TextCanvas" IsHitTestVisible="False"/>
+</Window>

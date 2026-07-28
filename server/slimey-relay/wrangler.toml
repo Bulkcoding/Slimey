@@ -1,4 +1,4 @@
-# Slimey 릴레이 서버 (Cloudflare Workers + Durable Objects)
+# ThrowMe 릴레이 서버 (Cloudflare Workers + Durable Objects)
 #
 # 배포 전 준비:
 #   1) npm install

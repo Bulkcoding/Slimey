@@ -1,0 +1,10 @@
+<Window x:Class="ThrowMe.Views.BowlingScoreboardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ThrowMeBowlingScore"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" Focusable="False" IsHitTestVisible="False"
+        ResizeMode="NoResize" SizeToContent="Manual"
+        Width="760" Height="330" Left="0" Top="0">
+    <Viewbox x:Name="Box" Stretch="Fill" IsHitTestVisible="False"/>
+</Window>

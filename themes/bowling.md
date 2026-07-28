@@ -3,7 +3,7 @@
 > 이 파일은 이 테마 세션이 **작업하면서 직접 갱신**한다.
 > 평소 자동으로 읽지 않고, **사용자가 요청할 때만** 읽는 문서다.
 
-- **브랜치 / 폴더**: `theme/bowling` / `../Slimey-bowling`
+- **브랜치 / 폴더**: `theme/bowling` / `../ThrowMe-bowling`
 - **enum**: `SlimeSkinKind.Bowling = 6` (예약표 배정 번호)
 - **설정창 표시 이름**: `"볼링공"`
 - **상태**: 🔀 머지됨 (`main` 통합 완료)
@@ -20,9 +20,9 @@
 
 ## 2. 만든 / 수정한 파일
 **신규**
-- `src/Slimey/Views/Skins/BowlingSkin.xaml`
-- `src/Slimey/Views/Skins/BowlingSkin.xaml.cs`
-- `src/Slimey/Views/Skins/ISkinRolling.cs` — 굴러가며 무늬가 바뀌는 스킨의 계약
+- `src/ThrowMe/Views/Skins/BowlingSkin.xaml`
+- `src/ThrowMe/Views/Skins/BowlingSkin.xaml.cs`
+- `src/ThrowMe/Views/Skins/ISkinRolling.cs` — 굴러가며 무늬가 바뀌는 스킨의 계약
 
 **공유 파일 append (충돌 핫스팟)**
 - `Models/SlimeSkinKind.cs` — enum `Bowling = 6` 추가

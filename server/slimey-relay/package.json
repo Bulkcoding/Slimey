@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Slimey 멀티 PC 인터넷 확장 — 방 코드 기반 릴레이 서버 (Cloudflare Workers + Durable Objects)",
+  "description": "ThrowMe 멀티 PC 인터넷 확장 — 방 코드 기반 릴레이 서버 (Cloudflare Workers + Durable Objects)",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

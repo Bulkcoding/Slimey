@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- System.Windows.Forms.Screen / Cursor ?ъ슜???꾪빐 ?쒖꽦??(SDK ?댁옣, NuGet 遺덊븘?? -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ThrowMe</RootNamespace>
+    <AssemblyName>ThrowMe</AssemblyName>
+    <!-- Per-Monitor DPI Awareness V2 瑜??꾪븳 留ㅻ땲?섏뒪??-->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WPF 吏꾩엯?먯씠誘濡?DPI ??留ㅻ땲?섏뒪?몃줈 ?쒖뼱. WinForms ??DPI 寃쎄퀬???듭젣. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <!-- 踰꾩쟾(?먮룞 ?낅뜲?댄듃 鍮꾧탳 湲곗?). 由대━?ㅻ쭏???щ┛?? -->
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
+  </PropertyGroup>
+
+</Project>
+
+

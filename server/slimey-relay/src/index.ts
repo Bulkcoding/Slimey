@@ -1,4 +1,4 @@
-// Slimey 릴레이 서버 — Worker 진입점.
+// ThrowMe 릴레이 서버 — Worker 진입점.
 // 역할: WSS 업그레이드 요청의 방 코드를 파싱해 해당 Room Durable Object로 라우팅.
 //
 //   wss://<host>/room/<ROOM_CODE>   → RoomDurableObject(idFromName(ROOM_CODE))
@@ -30,7 +30,7 @@ export default {
     }
 
     if (parts.length !== 2 || parts[0] !== "room") {
-      return new Response("Slimey relay. Connect to /room/<CODE> via WebSocket.", {
+      return new Response("ThrowMe relay. Connect to /room/<CODE> via WebSocket.", {
         status: 404,
       });
     }

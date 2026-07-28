@@ -1,4 +1,4 @@
-// Slimey 릴레이 — Room Durable Object.
+// ThrowMe 릴레이 — Room Durable Object.
 //
 // 방 하나 = DO 인스턴스 하나(전 세계 단일). DO는 단일 스레드로 이벤트를 하나씩
 // 처리하므로 락 없이 소유권 경합이 원천적으로 안전하다("공은 정확히 한 대").

@@ -3,7 +3,7 @@
 > 이 파일은 이 테마 세션이 **작업하면서 직접 갱신**한다.
 > 평소 자동으로 읽지 않고, **사용자가 요청할 때만** 읽는 문서다.
 
-- **브랜치 / 폴더**: `theme/basketball` / `../Slimey-basketball`
+- **브랜치 / 폴더**: `theme/basketball` / `../ThrowMe-basketball`
 - **enum**: `SlimeSkinKind.Basketball = 5`
 - **설정창 표시 이름**: `"농구공"`
 - **상태**: 🔀 머지됨 (`main` 통합 완료)
@@ -24,11 +24,11 @@
 
 ## 2. 만든 / 수정한 파일
 **신규**
-- `src/Slimey/Views/Skins/BasketballSkin.xaml` / `.xaml.cs` — 농구공 스킨 + 무늬 교체(`OnBounce`).
-- `src/Slimey/Views/Skins/ISkinBounce.cs` — 튈 때 알림 훅(무늬 교체용).
-- `src/Slimey/Views/HoopWindow.xaml` / `.xaml.cs` — 골대 창(기둥/암/수평 림/그물, 그물 스프링, 득점 좌표 노출).
-- `src/Slimey/Views/ScoreboardWindow.xaml` / `.xaml.cs` — 모니터 최상단 점수판(교차 채점).
-- `src/Slimey/Services/PreviewRenderer.cs` — 개발용 오프라인 렌더(`--render-preview <폴더>`), 일반 실행 무영향.
+- `src/ThrowMe/Views/Skins/BasketballSkin.xaml` / `.xaml.cs` — 농구공 스킨 + 무늬 교체(`OnBounce`).
+- `src/ThrowMe/Views/Skins/ISkinBounce.cs` — 튈 때 알림 훅(무늬 교체용).
+- `src/ThrowMe/Views/HoopWindow.xaml` / `.xaml.cs` — 골대 창(기둥/암/수평 림/그물, 그물 스프링, 득점 좌표 노출).
+- `src/ThrowMe/Views/ScoreboardWindow.xaml` / `.xaml.cs` — 모니터 최상단 점수판(교차 채점).
+- `src/ThrowMe/Services/PreviewRenderer.cs` — 개발용 오프라인 렌더(`--render-preview <폴더>`), 일반 실행 무영향.
 
 **공유 파일 (충돌 핫스팟 / 농구 통합)**
 - `Models/SlimeSkinKind.cs` — `Basketball = 5` 추가

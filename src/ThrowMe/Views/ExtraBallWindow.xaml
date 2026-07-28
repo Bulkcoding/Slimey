@@ -1,0 +1,10 @@
+<Window x:Class="ThrowMe.Views.ExtraBallWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ThrowMeBall"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" Focusable="False"
+        ResizeMode="NoResize" SizeToContent="Manual"
+        Width="96" Height="96" Left="0" Top="0">
+    <ContentControl x:Name="Host"/>
+</Window>

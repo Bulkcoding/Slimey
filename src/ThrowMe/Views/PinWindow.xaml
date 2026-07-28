@@ -1,0 +1,13 @@
+<Window x:Class="ThrowMe.Views.PinWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ThrowMePin"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" Focusable="False"
+        ResizeMode="NoResize" SizeToContent="Manual"
+        Width="192" Height="192" Left="0" Top="0">
+    <!-- 창은 핀보다 넉넉히 크다(패딩). 핀이 밑동을 축으로 넘어질 때 잘리지 않도록. -->
+    <Grid>
+        <ContentControl x:Name="Host" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    </Grid>
+</Window>

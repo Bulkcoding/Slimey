@@ -1,10 +1,10 @@
-# Slimey 릴레이 서버 (Cloudflare Workers + Durable Objects)
+# ThrowMe 릴레이 서버 (Cloudflare Workers + Durable Objects)
 
-Slimey 멀티 PC 인터넷 확장(B안)의 **방 코드 기반 릴레이 서버**.
+ThrowMe 멀티 PC 인터넷 확장(B안)의 **방 코드 기반 릴레이 서버**.
 집↔집·집↔사무실처럼 서로 다른 네트워크의 PC들을 **로그인(방 코드+시크릿)만으로** 묶어
 공(슬라임)을 인터넷 너머로 주고받게 한다.
 
-설계: 리포지토리 루트의 `Slimey_멀티PC_인터넷_릴레이_설계.md`
+설계: 리포지토리 루트의 `ThrowMe_멀티PC_인터넷_릴레이_설계.md`
 
 ## 핵심 개념
 
@@ -37,14 +37,14 @@ npm run deploy       # 배포 → https://slimey-relay.<계정>.workers.dev 발�
   ※ 무료 조건은 시점에 따라 바뀔 수 있으니 배포 직전 Cloudflare Workers/DO 요금 페이지 확인 권장.
 - WSS·TLS·도메인(`*.workers.dev`)은 Cloudflare가 자동 제공(별도 설정 0).
 
-## 클라이언트(Slimey 앱) 연결값
+## 클라이언트(ThrowMe 앱) 연결값
 
-배포 후 나온 주소를 각 PC의 Slimey 설정에 입력한다(설정 UI는 Phase 7-H, 그전엔 `%LOCALAPPDATA%\Slimey\relay.json`):
+배포 후 나온 주소를 각 PC의 ThrowMe 설정에 입력한다(설정 UI는 Phase 7-H, 그전엔 `%LOCALAPPDATA%\ThrowMe\relay.json`):
 
 | 항목 | 예시 | 설명 |
 |------|------|------|
 | ServerBaseUrl | `wss://slimey-relay.내계정.workers.dev` | 배포 주소(http(s):// 넣어도 ws(s)://로 보정) |
-| RoomCode | `SLIMEY-A3F9` | 같이 묶을 PC들에 동일 입력(대문자/숫자/하이픈, 3~64자) |
+| RoomCode | `THROWME-A3F9` | 같이 묶을 PC들에 동일 입력(대문자/숫자/하이픈, 3~64자) |
 | Secret | (임의 비밀번호) | 같은 방 PC들에 동일 입력. 최초 참여 PC가 이 값으로 방 생성 |
 | NodeId | `집-데스크톱` | 이 PC 이름(방 안에서 고유). 기본=컴퓨터 이름 |
 
@@ -52,7 +52,7 @@ npm run deploy       # 배포 → https://slimey-relay.<계정>.workers.dev 발�
 
 `src/protocol.ts` 참조. 봉투(Envelope) + 타입별 페이로드(HELLO/WELCOME/PRESENCE/
 ROOM_CONFIG/HANDOFF/ACK/HANDOFF_RESULT/HEARTBEAT/ERROR). C# 클라이언트의
-`src/Slimey/Network/RelayMessages.cs` 와 1:1 대응.
+`src/ThrowMe/Network/RelayMessages.cs` 와 1:1 대응.
 
 ## 파일
 

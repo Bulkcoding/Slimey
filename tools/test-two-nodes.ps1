@@ -11,7 +11,7 @@
     A 슬라임을 화면 오른쪽으로 세게 던지면 → 사라지고 → B 슬라임이 왼쪽에서 들어온다.
     (두 인스턴스가 같은 화면을 공유하므로, "오른쪽으로 나가 왼쪽에서 재등장"하는 형태로 보인다.)
 
-  종료: 각 슬라임 우클릭 → 종료, 또는  Get-Process Slimey | Stop-Process
+  종료: 각 슬라임 우클릭 → 종료, 또는  Get-Process ThrowMe | Stop-Process
 #>
 param(
     [Parameter(Mandatory = $true)][string]$Server,
@@ -26,10 +26,10 @@ $ErrorActionPreference = "Stop"
 
 if (-not $Exe) {
     $root = Split-Path -Parent $PSScriptRoot
-    $Exe = Join-Path $root "src\Slimey\bin\Release\net8.0-windows\win-x64\publish\Slimey.exe"
+    $Exe = Join-Path $root "src\ThrowMe\bin\Release\net8.0-windows\win-x64\publish\ThrowMe.exe"
 }
 if (-not (Test-Path $Exe)) {
-    Write-Error "Slimey.exe 를 찾을 수 없습니다: $Exe`n먼저 publish 하세요:`n  dotnet publish src/Slimey/Slimey.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true"
+    Write-Error "ThrowMe.exe 를 찾을 수 없습니다: $Exe`n먼저 publish 하세요:`n  dotnet publish src/ThrowMe/ThrowMe.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true"
 }
 
 Write-Output "exe    : $Exe"
@@ -58,8 +58,8 @@ Start-Process -FilePath $Exe -ArgumentList $argsB | Out-Null
 Start-Sleep -Seconds 2
 
 Write-Output ""
-Write-Output "실행된 Slimey 프로세스:"
-Get-Process Slimey -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table -AutoSize | Out-String | Write-Output
+Write-Output "실행된 ThrowMe 프로세스:"
+Get-Process ThrowMe -ErrorAction SilentlyContinue | Select-Object Id, StartTime | Format-Table -AutoSize | Out-String | Write-Output
 
 Write-Output @"
 --- 확인 방법 ---
@@ -70,6 +70,6 @@ Write-Output @"
 3) 이제 좌/우 아무 방향으로 던져도 계속 넘어갑니다(양방향 연결).
    왼쪽으로 던지면 상대의 오른쪽에서, 오른쪽으로 던지면 상대의 왼쪽에서 등장.
 
-종료: Get-Process Slimey | Stop-Process
-로그: %LOCALAPPDATA%\Slimey\slimey.log
+종료: Get-Process ThrowMe | Stop-Process
+로그: %LOCALAPPDATA%\ThrowMe\ThrowMe.log
 "@
