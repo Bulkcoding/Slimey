@@ -142,12 +142,24 @@ public partial class App : Application
             Logger.Info($"Updated to v{notes.Version}.");
             if (_settings is { ShowReleaseNotes: false }) return;
 
-            // 슬라임 창이 자리를 잡은 뒤 뜨도록 뒤로 미룬다(시작을 막지 않음).
-            Dispatcher.BeginInvoke(new Action(() =>
+            // 슬라임 창이 자리를 잡은 뒤 뜨도록 살짝 미룬다(시작을 막지 않음).
+            //
+            // [주의] 예전에는 DispatcherPriority.ApplicationIdle 로 예약했는데, 물리 렌더 루프
+            // (CompositionTarget.Rendering)가 도는 동안에는 dispatcher 가 idle 이 되지 않아
+            // 콜백이 실행되지 않았다. 공이 정지해 있을 때만 팝업이 뜨고, 정작 업데이트 직후
+            // 릴레이로 공을 받아 루프가 돌면 영영 안 떴다.
+            // 타이머는 idle 여부와 무관하게 발화하므로 확실하다.
+            var timer = new System.Windows.Threading.DispatcherTimer
             {
+                Interval = TimeSpan.FromMilliseconds(800),
+            };
+            timer.Tick += (_, _) =>
+            {
+                timer.Stop();
                 try { new ReleaseNotesWindow(notes, _settings).Show(); }
                 catch (Exception ex) { Logger.Error("Failed to show release notes.", ex); }
-            }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            };
+            timer.Start();
         }
         catch (Exception ex)
         {

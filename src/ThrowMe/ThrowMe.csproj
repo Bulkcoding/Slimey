@@ -6,25 +6,24 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <!-- System.Windows.Forms.Screen / Cursor 사용을 위해 활성화 (SDK 내장, NuGet 불필요) -->
+    <!-- System.Windows.Forms.Screen / Cursor ?ъ슜???꾪빐 ?쒖꽦??(SDK ?댁옣, NuGet 遺덊븘?? -->
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>ThrowMe</RootNamespace>
     <AssemblyName>ThrowMe</AssemblyName>
-    <!-- Per-Monitor DPI Awareness V2 를 위한 매니페스트 -->
+    <!-- Per-Monitor DPI Awareness V2 瑜??꾪븳 留ㅻ땲?섏뒪??-->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- WPF 진입점이므로 DPI 는 매니페스트로 제어. WinForms 의 DPI 경고는 억제. -->
+    <!-- WPF 吏꾩엯?먯씠誘濡?DPI ??留ㅻ땲?섏뒪?몃줈 ?쒖뼱. WinForms ??DPI 寃쎄퀬???듭젣. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
-    <!-- exe(탐색기·작업표시줄·바로가기) 아이콘 -->
+    <!-- exe(?먯깋湲걔룹옉?낇몴?쒖쨪쨌諛붾줈媛湲? ?꾩씠肄?-->
     <ApplicationIcon>Resources\ThrowMe.ico</ApplicationIcon>
-    <!-- 버전(자동 업데이트 비교 기준). 릴리스마다 올린다. -->
-    <Version>1.8.0</Version>
-    <AssemblyVersion>1.8.0.0</AssemblyVersion>
-    <FileVersion>1.8.0.0</FileVersion>
+    <!-- 踰꾩쟾(?먮룞 ?낅뜲?댄듃 鍮꾧탳 湲곗?). 由대━?ㅻ쭏???щ┛?? -->
+    <Version>1.9.0</Version>
+    <AssemblyVersion>1.9.0.0</AssemblyVersion>
+    <FileVersion>1.9.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 같은 .ico 를 런타임에도 읽는다(트레이·창 아이콘). ApplicationIcon 은 Win32 리소스로만
-         들어가서 WPF 에서 직접 스트림으로 열 수 없기 때문에 Resource 로 한 번 더 포함한다. -->
+    <!-- 媛숈? .ico 瑜??고??꾩뿉???쎈뒗???몃젅?는룹갹 ?꾩씠肄?. ApplicationIcon ? Win32 由ъ냼?ㅻ줈留?         ?ㅼ뼱媛??WPF ?먯꽌 吏곸젒 ?ㅽ듃由쇱쑝濡??????녾린 ?뚮Ц??Resource 濡???踰????ы븿?쒕떎. -->
     <Resource Include="Resources\ThrowMe.ico" />
   </ItemGroup>
 

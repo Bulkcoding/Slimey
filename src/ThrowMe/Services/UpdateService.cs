@@ -147,8 +147,8 @@ public static class UpdateService
             File.Move(part, PendingExe);
             File.WriteAllText(PendingVer, latest.ToString());
 
-            // 릴리스 노트도 같이 저장 — 이미 받아 둔 응답에 들어 있어 추가 요청이 필요 없다.
-            SavePendingNotes(root, latest);
+            // 릴리스 노트 저장. 건너뛴 중간 버전이 있으면 그 내용까지 모아 담는다.
+            await SavePendingNotesAsync(http, root, latest);
 
             // 받아 둔 즉시 알린다. 예전에는 여기서 끝내고 "다음 실행 때" 교체했기 때문에
             // 사용자가 앱을 두 번 켜야 새 버전이 됐다. 이제 이 시점에 바로 적용을 제안한다.
@@ -212,23 +212,95 @@ public static class UpdateService
         return http;
     }
 
-    /// <summary>릴리스 응답에서 노트를 뽑아 pending_notes.json 으로 저장.</summary>
-    private static void SavePendingNotes(JsonElement root, Version version)
+    /// <summary>
+    /// 릴리스 노트를 pending_notes.json 으로 저장한다.
+    ///
+    /// 한 번에 여러 버전을 건너뛰는 경우(예: 1.5.0 → 1.8.0)를 위해 <b>그 사이의 모든 릴리스</b>
+    /// 본문을 모아서 담는다. 예전에는 최신 릴리스 하나만 담아서 중간 버전의 변경 내용이
+    /// 통째로 사라졌다.
+    /// </summary>
+    private static async Task SavePendingNotesAsync(HttpClient http, JsonElement latestRoot, Version latest)
     {
         try
         {
-            string body = root.TryGetProperty("body", out var b) ? (b.GetString() ?? "") : "";
-            string title = root.TryGetProperty("name", out var n) ? (n.GetString() ?? "") : "";
+            var sections = await FetchNotesBetweenAsync(http, Current, latest);
+
+            string title;
+            string body;
+
+            if (sections.Count > 1)
+            {
+                // 여러 버전을 건너뛴 경우: 최신 → 과거 순으로 모두 싣는다.
+                title = $"v{sections[^1].Version} → v{sections[0].Version}";
+                body = string.Join("\n\n", sections.Select(s =>
+                    $"## v{s.Version}\n{s.Body}".TrimEnd()));
+            }
+            else if (sections.Count == 1)
+            {
+                title = sections[0].Title;
+                body = sections[0].Body;
+            }
+            else
+            {
+                // 목록 조회에 실패하면 최신 릴리스 하나만이라도 담는다(기존 동작).
+                title = latestRoot.TryGetProperty("name", out var n) ? (n.GetString() ?? "").Trim() : "";
+                body = latestRoot.TryGetProperty("body", out var b)
+                    ? (b.GetString() ?? "").Replace("\r\n", "\n").Trim()
+                    : "";
+            }
 
             var notes = new ReleaseNotes
             {
-                Version = version.ToString(3),
-                Title = title.Trim(),
-                Body = body.Replace("\r\n", "\n").Trim(),
+                Version = latest.ToString(3),
+                Title = title,
+                Body = body,
             };
             File.WriteAllText(PendingNotes, JsonSerializer.Serialize(notes));
         }
         catch (Exception ex) { Logger.Error("Failed to save pending release notes.", ex); }
+    }
+
+    /// <summary>
+    /// <paramref name="from"/> 초과 ~ <paramref name="to"/> 이하인 릴리스들의 노트를
+    /// 최신순으로 반환한다. 실패하면 빈 목록.
+    /// </summary>
+    private static async Task<List<ReleaseNotes>> FetchNotesBetweenAsync(
+        HttpClient http, Version from, Version to)
+    {
+        var result = new List<ReleaseNotes>();
+        try
+        {
+            string api = $"https://api.github.com/repos/{UpdateConfig.Owner}/{UpdateConfig.Repo}/releases?per_page=30";
+            string json = await http.GetStringAsync(api);
+            using var doc = JsonDocument.Parse(json);
+
+            var items = new List<(Version V, ReleaseNotes N)>();
+            foreach (var rel in doc.RootElement.EnumerateArray())
+            {
+                // 초안·프리릴리스는 제외
+                if (rel.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True) continue;
+                if (rel.TryGetProperty("prerelease", out var p) && p.ValueKind == JsonValueKind.True) continue;
+
+                Version? v = ParseTag(rel.GetProperty("tag_name").GetString());
+                if (v == null || v <= from || v > to) continue;
+
+                items.Add((v, new ReleaseNotes
+                {
+                    Version = v.ToString(3),
+                    Title = rel.TryGetProperty("name", out var n) ? (n.GetString() ?? "").Trim() : "",
+                    Body = rel.TryGetProperty("body", out var b)
+                        ? (b.GetString() ?? "").Replace("\r\n", "\n").Trim()
+                        : "",
+                }));
+            }
+
+            result.AddRange(items.OrderByDescending(x => x.V).Select(x => x.N));
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to fetch release list; falling back to the latest release only.", ex);
+        }
+        return result;
     }
 
     /// <summary>exe 교체가 확정되면 pending_notes → applied_notes 로 옮긴다(버전 확정 기록).</summary>

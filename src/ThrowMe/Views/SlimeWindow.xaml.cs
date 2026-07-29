@@ -1968,6 +1968,10 @@ public partial class SlimeWindow : Window
 
     private void GainBall(bool spawnAtCenter)
     {
+        // 종료 중에 릴레이 메시지가 늦게 도착하면 이미 닫힌 창에 Show() 를 호출해
+        // InvalidOperationException("창이 닫힘 후에는 Show 할 수 없습니다")이 반복됐다.
+        if (_shuttingDown) return;
+
         _ownsBall = true;
         if (spawnAtCenter) ResetPositionToCenter();
         if (_settings.SlimeVisible) Show();
@@ -2676,8 +2680,12 @@ public partial class SlimeWindow : Window
     }
 
     // ── 정리 ────────────────────────────────────────────────
+    /// <summary>종료 절차가 시작됐는가. 늦게 도착한 릴레이 콜백이 닫힌 창을 건드리지 않게 한다.</summary>
+    private bool _shuttingDown;
+
     public void ShutdownCleanup()
     {
+        _shuttingDown = true;
         StopRendering();
         ToastWindow.CloseAll();
         _relay?.Dispose();
