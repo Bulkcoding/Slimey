@@ -108,6 +108,9 @@ public partial class App : Application
                 prompt.ShowDialog();
                 if (!prompt.RestartNow) return;
 
+                // 확인창에서 이미 노트를 봤으면 교체 후 같은 내용이 또 뜨지 않게 한다.
+                prompt.MarkNotesSeenIfShown();
+
                 if (UpdateService.TryApplyStagedUpdate())
                 {
                     Logger.Info($"Applying staged update v{version} on user request; restarting.");

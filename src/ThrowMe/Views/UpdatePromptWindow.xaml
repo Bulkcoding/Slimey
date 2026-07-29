@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ThrowMe 업데이트"
-        Width="430" SizeToContent="Height"
+        Width="460" SizeToContent="Height" MaxHeight="620"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
         ShowInTaskbar="False" Topmost="True" FontFamily="Pretendard, Malgun Gothic" Icon="/Resources/ThrowMe.ico">
@@ -16,6 +16,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="42"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
@@ -52,8 +53,16 @@
                            Text="나중에 하면 다음에 앱을 켤 때 조용히 적용됩니다."/>
             </StackPanel>
 
+            <!-- 무엇이 바뀌는지: 받아 둔 릴리스 노트를 여기서 미리 보여준다.
+                 예전에는 재시작한 뒤에야 내용을 알 수 있어, 뭘 받는지 모르고 결정해야 했다. -->
+            <ScrollViewer x:Name="NotesScroll" Grid.Row="2" Margin="24,14,16,0"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                          Visibility="Collapsed">
+                <StackPanel x:Name="NotesPanel" Margin="0,0,8,0"/>
+            </ScrollViewer>
+
             <!-- 하단 -->
-            <Grid Grid.Row="2" Margin="24,20,24,20">
+            <Grid Grid.Row="3" Margin="24,20,24,20">
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
                     <CheckBox x:Name="MuteToggle" Style="{StaticResource Toggle}" VerticalAlignment="Center"/>
                     <TextBlock Text="다음부터 묻지 않기" Style="{StaticResource RowDesc}"

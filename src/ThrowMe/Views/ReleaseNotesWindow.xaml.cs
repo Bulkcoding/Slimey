@@ -1,11 +1,7 @@
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
-using System.Windows.Media;
 using ThrowMe.Models;
 using ThrowMe.Services;
-using Brush = System.Windows.Media.Brush;
 
 namespace ThrowMe.Views;
 
@@ -13,7 +9,8 @@ namespace ThrowMe.Views;
 /// 업데이트가 적용된 뒤 "무엇이 달라졌는지" 한 번 보여주는 팝업.
 ///
 /// 본문은 GitHub 릴리스 노트(마크다운)를 <see cref="ReleaseNotesFormatter"/> 로
-/// 최소 서식만 해석해 그린다. 외부 마크다운 패키지는 쓰지 않는다.
+/// 최소 서식만 해석해 <see cref="NotesRenderer"/> 가 그린다(업데이트 확인창과 공유).
+/// 외부 마크다운 패키지는 쓰지 않는다.
 /// </summary>
 public partial class ReleaseNotesWindow : Window
 {
@@ -30,7 +27,7 @@ public partial class ReleaseNotesWindow : Window
         if (!string.IsNullOrWhiteSpace(notes.Title))
             HeadlineText.Text = notes.Title;
 
-        BuildBody(notes.Body);
+        NotesRenderer.Render(NotesPanel, notes.Body, this);
 
         // 토글 초기값 + 변경 시 설정 반영(설정이 주어진 경우에만).
         if (_settings != null)
@@ -49,134 +46,6 @@ public partial class ReleaseNotesWindow : Window
     {
         if (_settings != null)
             _settings.ShowReleaseNotes = MuteToggle.IsChecked != true;
-    }
-
-    /// <summary>파싱된 줄들을 TextBlock 으로 쌓는다.</summary>
-    private void BuildBody(string body)
-    {
-        var lines = ReleaseNotesFormatter.Parse(body);
-
-        if (lines.Count == 0)
-        {
-            NotesPanel.Children.Add(new TextBlock
-            {
-                Text = "자세한 변경 내용은 GitHub 릴리스 페이지에서 확인할 수 있습니다.",
-                Style = (Style)FindResource("RowDesc"),
-            });
-            return;
-        }
-
-        foreach (var line in lines)
-        {
-            switch (line.Kind)
-            {
-                case NoteLineKind.Spacer:
-                    NotesPanel.Children.Add(new Border { Height = 8 });
-                    break;
-
-                case NoteLineKind.Heading:
-                    NotesPanel.Children.Add(MakeText(line, fontSize: 14, bold: true,
-                        brush: (Brush)FindResource("TextBrush"), topMargin: 12));
-                    break;
-
-                case NoteLineKind.Bullet:
-                    NotesPanel.Children.Add(MakeBullet(line));
-                    break;
-
-                case NoteLineKind.Quote:
-                    NotesPanel.Children.Add(MakeQuote(line));
-                    break;
-
-                default:
-                    NotesPanel.Children.Add(MakeText(line, fontSize: 13, bold: false,
-                        brush: (Brush)FindResource("TextBrush"), topMargin: 2));
-                    break;
-            }
-        }
-    }
-
-    private TextBlock MakeText(NoteLine line, double fontSize, bool bold, Brush brush, double topMargin)
-    {
-        var tb = new TextBlock
-        {
-            FontSize = fontSize,
-            Foreground = brush,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, topMargin, 0, 0),
-            LineHeight = fontSize * 1.55,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        };
-        if (bold) tb.FontWeight = FontWeights.Bold;
-        AddRuns(tb, line, forceBold: bold);
-        return tb;
-    }
-
-    /// <summary>인용문: 왼쪽에 강조색 세로선을 둔 안내 블록(릴리스 노트의 ⚠️ 콜아웃).</summary>
-    private Border MakeQuote(NoteLine line)
-    {
-        var text = new TextBlock
-        {
-            FontSize = 12.5,
-            Foreground = (Brush)FindResource("MutedBrush"),
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = 12.5 * 1.55,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        };
-        AddRuns(text, line, forceBold: false);
-
-        return new Border
-        {
-            Margin = new Thickness(0, 8, 0, 4),
-            Padding = new Thickness(10, 7, 10, 7),
-            CornerRadius = new CornerRadius(0, 6, 6, 0),
-            Background = (Brush)FindResource("CardBg"),
-            BorderThickness = new Thickness(3, 0, 0, 0),
-            BorderBrush = (Brush)FindResource("Accent"),
-            Child = text,
-        };
-    }
-
-    /// <summary>불릿: 들여쓰기 + 점 + 본문(줄바꿈 시 본문만 들여쓰기 유지).</summary>
-    private Grid MakeBullet(NoteLine line)
-    {
-        var grid = new Grid { Margin = new Thickness(line.Indent * 16, 3, 0, 0) };
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(14) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        var dot = new TextBlock
-        {
-            Text = "•",
-            FontSize = 13,
-            Foreground = (Brush)FindResource("Accent"),
-            VerticalAlignment = VerticalAlignment.Top,
-        };
-        Grid.SetColumn(dot, 0);
-
-        var text = new TextBlock
-        {
-            FontSize = 13,
-            Foreground = (Brush)FindResource("TextBrush"),
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = 13 * 1.55,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        };
-        AddRuns(text, line, forceBold: false);
-        Grid.SetColumn(text, 1);
-
-        grid.Children.Add(dot);
-        grid.Children.Add(text);
-        return grid;
-    }
-
-    private static void AddRuns(TextBlock target, NoteLine line, bool forceBold)
-    {
-        foreach (var (text, boldRun) in line.Runs)
-        {
-            if (text.Length == 0) continue;
-            var run = new Run(text);
-            if (boldRun && !forceBold) run.FontWeight = FontWeights.Bold;
-            target.Inlines.Add(run);
-        }
     }
 
     private void OnTitleBarDrag(object sender, MouseButtonEventArgs e)

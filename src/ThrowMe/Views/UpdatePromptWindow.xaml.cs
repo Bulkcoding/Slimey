@@ -38,6 +38,39 @@ public partial class UpdatePromptWindow : Window
         {
             MuteToggle.Visibility = Visibility.Collapsed;
         }
+
+        ShowPendingNotes();
+    }
+
+    /// <summary>
+    /// 받아 둔 릴리스 노트를 여기서 미리 보여준다.
+    /// 예전에는 재시작한 뒤에야 내용을 알 수 있어서, 무엇을 받는지 모르고 결정해야 했다.
+    /// 여기서 읽었으면 교체 후 같은 내용이 또 뜨지 않도록 표시해 둔다.
+    /// </summary>
+    private void ShowPendingNotes()
+    {
+        try
+        {
+            var notes = Services.UpdateService.TryReadPendingNotes();
+            if (notes == null || string.IsNullOrWhiteSpace(notes.Body)) return;
+
+            Services.NotesRenderer.Render(NotesPanel, notes.Body, this);
+            NotesScroll.Visibility = Visibility.Visible;
+            _notesShown = true;
+        }
+        catch (Exception ex)
+        {
+            Services.Logger.Error("Failed to preview release notes in update prompt.", ex);
+        }
+    }
+
+    /// <summary>이 창에서 노트를 이미 보여줬는가(중복 팝업 방지용).</summary>
+    private bool _notesShown;
+
+    /// <summary>노트를 여기서 봤다면, 교체 후 팝업이 중복으로 뜨지 않게 소비 처리한다.</summary>
+    public void MarkNotesSeenIfShown()
+    {
+        if (_notesShown) Services.UpdateService.MarkNotesSeen();
     }
 
     private void OnMuteChanged(object sender, RoutedEventArgs e)

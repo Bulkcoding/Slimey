@@ -331,6 +331,34 @@ public static class UpdateService
     /// 방금 업데이트가 적용되어 보여줄 노트가 있으면 반환하고 파일을 지운다(1회만 표시).
     /// 기록된 버전이 지금 실행 중인 버전과 다르면 무시한다(교체 실패/롤백 대비).
     /// </summary>
+    /// <summary>
+    /// 받아 둔(아직 적용 전) 릴리스 노트를 읽는다. 지우지 않는다.
+    /// 재시작을 묻는 창에서 "무엇이 바뀌는지" 미리 보여주는 데 쓴다.
+    /// </summary>
+    public static ReleaseNotes? TryReadPendingNotes()
+    {
+        try
+        {
+            if (!File.Exists(PendingNotes)) return null;
+            return JsonSerializer.Deserialize<ReleaseNotes>(File.ReadAllText(PendingNotes));
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("Failed to read pending release notes.", ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 노트를 이미 보여줬다고 표시한다(재시작 확인창에서 읽은 경우).
+    /// 승격할 것이 없으면 교체 후 같은 내용이 또 뜨지 않는다.
+    /// </summary>
+    public static void MarkNotesSeen()
+    {
+        try { if (File.Exists(PendingNotes)) File.Delete(PendingNotes); }
+        catch (Exception ex) { Logger.Error("Failed to mark notes as seen.", ex); }
+    }
+
     public static ReleaseNotes? TryConsumeAppliedNotes()
     {
         try
