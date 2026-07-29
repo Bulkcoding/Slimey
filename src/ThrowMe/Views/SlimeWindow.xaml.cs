@@ -750,9 +750,14 @@ public partial class SlimeWindow : Window
                 if (_settings.ThrowMode)
                 {
                     Vector2 throwV = _tracker.ComputeThrowVelocity(Now);
-                    // 농구공은 살살 던져지도록 감쇠 + 상한(중력 포물선에 맞춰).
+                    // 농구공은 던지기 가중치를 상쇄하고, 전용 감쇠 + 상한을 적용한다.
                     if (_settings.Skin == SlimeSkinKind.Basketball)
+                    {
+                        double throwPower = _settings.ThrowPower;
+                        if (throwPower > 0.01 && Math.Abs(throwPower - 1.0) > 0.01)
+                            throwV /= throwPower;
                         throwV = (throwV * BasketballThrowScale).ClampLength(BasketballMaxThrow);
+                    }
                     _physics.Velocity = throwV;
                 }
                 // 볼링: 기름칠 레인 보정(최소 속도 + 항상 전진)
@@ -1032,6 +1037,7 @@ public partial class SlimeWindow : Window
                 if (!_physics.IsCurrentPositionValid())
                     _physics.SetPositionClamped(_physics.Position);
                 ApplyWindowPosition();
+                ResizeHoops();
                 break;
         }
     }
@@ -1349,6 +1355,30 @@ public partial class SlimeWindow : Window
     private void RespawnHoops()
     {
         if (_hoops.Count > 0) SpawnHoops();
+    }
+
+    /// <summary>경기 상태는 유지한 채 현재 공 크기 비율로 골대만 다시 만든다.</summary>
+    private void ResizeHoops()
+    {
+        if (_hoops.Count == 0) return;
+
+        foreach (var h in _hoops) { try { h.Close(); } catch { } }
+        _hoops.Clear();
+
+        var areas = _monitors.WorkingAreas;
+        if (areas.Count == 0) return;
+
+        Rect leftArea = areas[0], rightArea = areas[0];
+        foreach (var area in areas)
+        {
+            if (area.Left < leftArea.Left) leftArea = area;
+            if (area.Right > rightArea.Right) rightArea = area;
+        }
+
+        AddHoop(HoopSide.Left, leftArea);
+        AddHoop(HoopSide.Right, rightArea);
+        _hasPrevBallY = false;
+        EnsureRendering();
     }
 
     /// <summary>그물 스프링 적분/렌더. 아직 흔들리는 골대가 있으면 true.</summary>
