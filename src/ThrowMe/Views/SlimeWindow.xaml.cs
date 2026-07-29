@@ -1521,6 +1521,7 @@ public partial class SlimeWindow : Window
     private bool _gameOver;
     private bool _ballLaunched;         // 이번 투구가 던져졌는가
     private bool _ballReachedEnd;       // 공이 레인 끝(핀 뒤 벽)에 닿았는가
+    private bool _ballHiddenForReset;   // 핀덱 뒤로 빠진 공을 다음 투구까지 숨겼는가
     private double _finishThrowAt;      // >0 이면 이 시각에 투구 마무리 처리
     private string? _banner;            // STRIKE!/거터! 등 임시 배너
     private double _bannerUntil;
@@ -1986,10 +1987,13 @@ public partial class SlimeWindow : Window
     /// <summary>공을 시작점(파울선)에 다시 놓고 다음 투구를 준비.</summary>
     private void ResetBallToStart()
     {
+        bool restoreBall = _ballHiddenForReset;
         _ballLaunched = false;
         _ballReachedEnd = false;
+        _ballHiddenForReset = false;
         _finishThrowAt = 0;
         MoveBallTo(_bl.BallStart);
+        if (restoreBall) ShowBall();
     }
 
     /// <summary>
@@ -2005,6 +2009,15 @@ public partial class SlimeWindow : Window
         double maxSpeed = _settings.SlimeSize * 45.0;
         if (_physics.Velocity.Length > maxSpeed)
             _physics.Velocity = _physics.Velocity.ClampLength(maxSpeed);
+
+        // 파울선 뒤에서 공을 들어 옮겼다 놓는 동작은 투구가 아니다.
+        // 핀 쪽(화면 위)으로 충분히 던졌을 때만 이번 투구를 시작한다.
+        const double minForwardSpeed = 120.0;
+        if (_physics.Velocity.Y >= -minForwardSpeed)
+        {
+            _physics.Velocity = Vector2.Zero;
+            return;
+        }
 
         _ballLaunched = true;
         _ballReachedEnd = false;
@@ -2026,6 +2039,21 @@ public partial class SlimeWindow : Window
             if (!_pins[i].Knocked) continue;
             try { _pins[i].Close(); } catch { }
             _pins.RemoveAt(i);
+        }
+        RestoreStandingPins();
+    }
+
+    /// <summary>이번 투구에서 쓰러지지 않은 핀은 원래 핀 번호의 자리로 되돌린다.</summary>
+    private void RestoreStandingPins()
+    {
+        double half = _settings.SlimeSize / 2.0;
+        foreach (var pin in _pins)
+        {
+            pin.Physics.Position = pin.StandCenter - new Vector2(half, half);
+            pin.Physics.Velocity = Vector2.Zero;
+            pin.Physics.AngularVelocity = 0;
+            pin.Physics.SurfaceSpin = 0;
+            pin.ApplyPosition();
         }
     }
 
@@ -2136,15 +2164,15 @@ public partial class SlimeWindow : Window
     {
         _frame++;
         _throwNo = 1;
-        ResetBallToStart();    // 공을 먼저 투구 위치로 치운 뒤
-        RespawnPins(_bl);      // 다음 프레임의 10핀을 세운다
+        RespawnPins(_bl);      // 다음 프레임의 10핀을 먼저 세운 뒤
+        ResetBallToStart();    // 숨긴 공을 투구 위치에 다시 배치한다
     }
 
     private void PrepareFullRackForNextThrow(int nextThrow)
     {
         _throwNo = nextThrow;
-        ResetBallToStart();    // 보너스 투구도 공을 먼저 회수한 다음
-        RespawnPins(_bl);      // 새 랙을 세워 공과 핀이 겹치지 않게 한다
+        RespawnPins(_bl);      // 새 랙을 먼저 세운 뒤
+        ResetBallToStart();    // 보너스 공을 투구 위치에 다시 배치한다
     }
 
     private void EndBowlingGame()
@@ -2331,6 +2359,7 @@ public partial class SlimeWindow : Window
         public double AlleyHalfBot { get; init; }
         public double DeckBotY { get; init; }
         public double ArrowsY { get; init; }
+        public double BallExitY { get; init; } // 뒤쪽 핀과 재충돌하기 전에 공을 회수할 지점
         public Vector2 BallStart { get; init; }
         public List<Vector2> PinCenters { get; init; }
     }
@@ -2341,11 +2370,11 @@ public partial class SlimeWindow : Window
         System.Windows.Rect wa = _monitors.PrimaryWorkingArea;
         double S = _settings.SlimeSize;
 
-        double cx = wa.Left + wa.Width / 2.0;
         double topY = wa.Top + wa.Height * 0.045;          // 원경(핀 뒤)
         double botY = wa.Bottom - wa.Height * 0.04;        // 근경(투구석 하단)
         double foulY = wa.Bottom - wa.Height * 0.15;       // 파울 라인(공 하한)
 
+        double cx = wa.Left + wa.Width / 2.0;
         // 레인 반폭: 위(좁음) → 아래(넓음)로 원근. 화면을 넘지 않게 상한.
         double laneHalfBot = Math.Min(wa.Width * 0.30, S * 2.2);
         double laneHalfTop = laneHalfBot * 0.64;
@@ -2382,6 +2411,9 @@ public partial class SlimeWindow : Window
             LaneHalfTop = laneHalfTop, LaneHalfBot = laneHalfBot,
             AlleyHalfTop = alleyHalfTop, AlleyHalfBot = alleyHalfBot,
             DeckBotY = deckBotY, ArrowsY = arrowsY,
+            // 뒷줄 핀 중심을 지난 뒤 회수한다. 공이 뒷줄에 충돌할 기회는 남기되,
+            // 핀덱 벽에서 되튀며 다시 핀을 쓸어버리는 상황은 막는다.
+            BallExitY = backY - S * 0.15,
             BallStart = ballStart, PinCenters = pins,
         };
     }
@@ -2437,9 +2469,14 @@ public partial class SlimeWindow : Window
         if (by < topLim)
         {
             by = topLim;
-            _ballReachedEnd = true;      // 레인 끝 도달 → 이번 투구 종료 트리거
-            // 끝에 닿으면 되돌아오지 않고 그대로 멈춘다.
-            if (_physics.Velocity.Y < 0) _physics.Velocity = _physics.Velocity.WithY(0);
+            if (_ballLaunched)
+            {
+                HideBallAtEnd();
+            }
+            else if (_physics.Velocity.Y < 0)
+            {
+                _physics.Velocity = _physics.Velocity.WithY(0);
+            }
         }
         else if (by > botLim)
         {
@@ -2470,6 +2507,18 @@ public partial class SlimeWindow : Window
         }
 
         _physics.Position = new Vector2(bx - half, by - half);
+    }
+
+    /// <summary>핀덱 뒤로 진행한 공을 숨기고, 핀 정리 뒤 다음 투구 위치에서만 다시 보이게 한다.</summary>
+    private void HideBallAtEnd()
+    {
+        if (_ballHiddenForReset) return;
+        _ballReachedEnd = true;
+        _ballHiddenForReset = true;
+        _physics.Velocity = Vector2.Zero;
+        _physics.AngularVelocity = 0;
+        _physics.SurfaceSpin = 0;
+        Hide();
     }
 
     /// <summary>드래그/잡기로 공을 옮길 때: 레인 위 + 파울선 위로만 놓을 수 있게 클램프.</summary>
@@ -2511,6 +2560,10 @@ public partial class SlimeWindow : Window
         double rBall = _settings.SlimeSize * 0.42;
         double rPin = PinRadius;
 
+        double ballCenterY = _physics.Position.Y + _settings.SlimeSize / 2.0;
+        if (_ballLaunched && !_ballHiddenForReset && ballCenterY <= _bl.BallExitY)
+            HideBallAtEnd();
+
         foreach (var p in _pins)
         {
             p.Physics.Update(dt);
@@ -2519,19 +2572,22 @@ public partial class SlimeWindow : Window
             ConfineToLane(p.Physics, rPin);
         }
 
-        // 공이 한 프레임에 많이 움직이면 핀을 뚫고 지나갈 수 있다(터널링).
-        // 지난 프레임 위치에서 현재 위치까지 잘게 나눠 충돌을 검사한다.
-        Vector2 curBall = _physics.Position;
-        double travel = (curBall - _ballPrevPos).Length;
-        double maxStep = (rBall + rPin) * 0.5;
-        int steps = _ballPrevInit && travel > maxStep
-            ? Math.Min(16, (int)Math.Ceiling(travel / maxStep))
-            : 1;
-        for (int s = 1; s <= steps; s++)
+        if (!_ballHiddenForReset)
         {
-            if (steps > 1)
-                _physics.Position = _ballPrevPos + (curBall - _ballPrevPos) * (s / (double)steps);
-            ResolveBowlingCollisions(rBall, rPin);
+            // 공이 한 프레임에 많이 움직이면 핀을 뚫고 지나갈 수 있다(터널링).
+            // 지난 프레임 위치에서 현재 위치까지 잘게 나눠 충돌을 검사한다.
+            Vector2 curBall = _physics.Position;
+            double travel = (curBall - _ballPrevPos).Length;
+            double maxStep = (rBall + rPin) * 0.5;
+            int steps = _ballPrevInit && travel > maxStep
+                ? Math.Min(16, (int)Math.Ceiling(travel / maxStep))
+                : 1;
+            for (int s = 1; s <= steps; s++)
+            {
+                if (steps > 1)
+                    _physics.Position = _ballPrevPos + (curBall - _ballPrevPos) * (s / (double)steps);
+                ResolveBowlingCollisions(rBall, rPin);
+            }
         }
         _ballPrevPos = _physics.Position;
         _ballPrevInit = true;
