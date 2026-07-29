@@ -346,7 +346,9 @@ public partial class SlimeWindow : Window
         SlimeBox.Width = s / _dpiScaleX;
         SlimeBox.Height = s / _dpiScaleY;
         // 클릭 영역은 공 + 여유만. 창 전체를 받으면 날아가는 동안 다른 창 클릭을 삼킨다.
-        double hit = s + 2.0 * Math.Max(0, _settings.ClickMarginPx);
+        // 설정창을 만지는 동안에는 여유를 없애 공 그림만큼만 받는다.
+        double margin = SettingsOpen ? 0 : Math.Max(0, _settings.ClickMarginPx);
+        double hit = s + 2.0 * margin;
         HitArea.Width = hit / _dpiScaleX;
         HitArea.Height = hit / _dpiScaleY;
         // 스핀 조준 원(공의 66% 크기)
@@ -1117,11 +1119,24 @@ public partial class SlimeWindow : Window
         if (_settingsWindow == null)
         {
             _settingsWindow = new SettingsWindow(_settings, this);
-            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            _settingsWindow.Closed += (_, _) =>
+            {
+                _settingsWindow = null;
+                ApplyWindowSize(); // 설정창이 닫히면 클릭 여유를 원래대로
+            };
         }
         _settingsWindow.Show();
         _settingsWindow.Activate();
+        ApplyWindowSize();         // 설정창이 열린 동안에는 공 크기로만 클릭을 받는다
     }
+
+    /// <summary>
+    /// 설정창이 열려 있는가. 열려 있는 동안에는 공 주변 클릭 여유를 없앤다.
+    ///
+    /// 여유가 넓으면 날아가는 공을 되치기 쉽지만, 그만큼 보이지 않는 원이 공을 따라다니며
+    /// 뒤에 있는 창의 클릭을 가린다. 설정을 만지는 동안에는 조작이 우선이므로 공 그림만큼만 받는다.
+    /// </summary>
+    private bool SettingsOpen => _settingsWindow is { IsVisible: true };
 
     private void OnResetPosition(object sender, RoutedEventArgs e) => ResetPositionPublic();
 
